@@ -12,11 +12,11 @@ The supported environment is **Codex on macOS ARM64**. The required software is 
 
 | Required software | Purpose |
 |---|---|
-| Obsidian | Storing and managing your notes. |
-| Graphify | Organizing relationships between notes and concepts. |
-| Archify | Creating an explanation or diagram when you request one. |
+| [Obsidian](https://obsidian.md/download) | Storing and managing your notes. |
+| [Graphify](https://github.com/Graphify-Labs/graphify) | Organizing relationships between notes and concepts. |
+| [Archify](https://github.com/tt-a1i/archify) | Creating an explanation or diagram when you request one. |
 
-Graphify uses Python, and Archify uses Node.js as its runtime. See [Third-party notices](THIRD_PARTY.md) for versions and details.
+Graphify uses Python, and Archify uses Node.js as its runtime. If a required tool is missing, you can ask Codex to help install it. See [Third-party notices](THIRD_PARTY.md) for the versions checked and more details.
 
 Clone the repository and enter its folder:
 
@@ -31,12 +31,16 @@ In this folder, open Codex and ask:
 Please install Batang according to this folder's AGENTS.md.
 ```
 
-Codex records the confirmed paths in the target project's `AGENTS.md` and verifies the single Batang skill registration.
+Codex confirms the project folder where you will use Batang and the vault where you keep your notes. The project is the folder where you work with Codex; it does not have to be the vault. Codex records confirmed settings in the project's `AGENTS.md` and preserves existing settings and skill registrations.
+
+Tell Codex whether you want to import existing notes and which notes to use. You can also prepare an empty vault to start fresh. Imported notes are copied, leaving the originals unchanged.
 
 ## Try it with natural language
 
 | Example request | Expected result |
 |---|---|
+| “Import the notes in this folder into Batang.” | Imports copies of the selected notes and checks their links. |
+| “Find related information in the imported notes.” | Explores notes and relationships, then identifies the sources. |
 | “Make an explanation page where I can select topics to explore this content.” | A page that changes the content in the same area below the selection buttons. |
 | “Use these notes to update decision.md with my decision and its sources.” | A scoped update that links the requested note to its sources. |
 | “Find and compare the decisions I made about this topic in these notes.” | A comparison of related notes that explains the decisions and their sources. |
@@ -72,7 +76,9 @@ Batang answers from the notes you select. Relationship maps and diagrams are sup
 
 For details, see [Reading and saving notes](skills/batang/references/source-access.md) and [Note format and sources](skills/batang/references/knowledge-contract.md).
 
-You can also import notes written elsewhere. Batang converts copies of the selected notes to its format, records their sources, and leaves the originals unchanged. Notes that cannot be converted are not registered, and Batang tells you why. See [import guidance](skills/batang/references/import.md).
+You can also import notes written elsewhere. Batang registers copies of the selected notes and their sources, then checks the links between copies. It leaves the originals unchanged. If an attribute or link needs review, it is preserved and Batang explains why. See [import guidance](skills/batang/references/import.md).
+
+You can edit imported note content and properties in Obsidian. If Batang cannot update the relationship data after saving a note, the note remains readable and Batang reports that the update is pending.
 
 You can give notes alternative names with `aliases`. The AI uses aliases of selected notes as clues to find related content. See [relationship guidance](skills/batang/components/supul/gori/workflow.md).
 

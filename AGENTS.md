@@ -12,8 +12,8 @@
 2. 저장소의 [Third-party notices](THIRD_PARTY.md), [설정 예시](examples/AGENTS.md), [마디 실행 계약의 설치·복구 절](skills/batang/components/madi/references/workflow-contract.md)을 읽는다. 스킬을 등록하기 위해 마디 작업을 먼저 시작할 필요는 없다.
 3. 대상 프로젝트의 기존 지침과 Obsidian, Graphify, Archify, 필요한 Python·Node.js 런타임의 설치 상태·호환 버전·경로를 확인한다. 이미 등록된 스킬도 조사하고 기존 설치·등록을 보존한다.
 4. 준비된 도구와 호환 버전은 그대로 사용한다. 누락된 항목과 위치를 알리고, 이미 승인된 범위 또는 사용자가 선택한 범위에서 설치·등록한다. 임의 업그레이드나 provider 대체, 기존 등록 덮어쓰기는 하지 않는다. `skills/batang` 하나를 같은 고정본에서 등록하고 전체 checkout과 내부 구성요소 절차를 함께 보존한다. 기존 바탕·마디 등록의 이전은 실행 계약에 따라 소유가 확인된 링크만 처리한다.
-5. 사용할 볼트·문서 목록·백업 위치·도구 경로·관계 결과 파일 위치를 사용자 선택과 실제 환경에서 확인하고, 알 수 없는 값만 묻는다. 확인한 `knowledge_root`, `active_index`, `backup_root`, `graphify_executable`, `graph_output`, `archify_executable`만 대상 프로젝트의 기존 `AGENTS.md`에 합친다. 기존 지침을 보존하며, 원본·볼트·활성 목록의 변경은 명시 승인이 있을 때만 한다. 역할·권장 모델·허용 대체·추론 수준·선택 기준은 기존 규약과 충돌을 확인해 병합하고 환경·방침이 바뀔 때만 갱신한다. 실제 배정과 대체 이유는 plan에, 호출 근거는 run에 둔다. 프로젝트 필수 모델·모드는 유지하고 전역 모델 설정은 변경하지 않는다.
-6. 가져올 자료 선택 및 복제는 [가져오기 계약](skills/batang/references/import.md)을 따른다.
+5. 사용할 볼트·문서 목록·백업 위치·도구 경로·관계 결과 파일 위치를 사용자 선택과 실제 환경에서 확인하고, 알 수 없는 값만 묻는다. 확인한 `knowledge_root`, `active_index`, `backup_root`, `graphify_executable`, `graph_output`, `archify_executable`과 필요한 로컬 `source_roots`·임시 저장 위치를 대상 프로젝트의 기존 `AGENTS.md`에 합친다. 기존 지침을 보존하며, 원본·볼트·활성 목록의 변경은 명시 승인이 있을 때만 한다. 역할·권장 모델·허용 대체·추론 수준·선택 기준은 기존 규약과 충돌을 확인해 병합하고 환경·방침이 바뀔 때만 갱신한다. 실제 배정과 대체 이유는 plan에, 호출 근거는 run에 둔다. 프로젝트 필수 모델·모드는 유지하고 전역 모델 설정은 변경하지 않는다.
+6. 가져올 자료 선택 및 복제는 [가져오기 계약](skills/batang/references/import.md)을 따른다. 원본·복제본 경로를 대조하고 선택한 각 항목의 등록과 관계 반영 상태를 확인한다. 첫 관계 자료 생성도 [고리](skills/batang/components/supul/gori/workflow.md) 절차에 따라 필요한 권한을 확인한다.
 7. 실제 경로와 hash, 등록 대상, 내부 구성요소 절차의 참조, 실행 파일 버전, 필요한 읽기 접근을 확인한다. 노트 저장, Graphify 갱신, Archify 도면 생성은 설정 확인만을 위해 실행하지 않는다. 완료 보고에는 실제 설치·설정·등록·검증을 수행한 항목만 적는다.
 
 ## 기본 사용
@@ -24,3 +24,14 @@
 - Obsidian·Graphify·Archify의 실제 경로와 접근은 호스트 설정에서 확인한다. 누락되면 임의 설치·경로 탐색·제공자 대체를 하지 않는다. Archify는 설명·시각화 요청이 있을 때만 실행한다.
 - 설치·복구·검토·릴리즈의 성공 여부는 실제 관찰과 해당 후보의 근거로 판단한다. 파일 존재나 정적 문구만으로 통과를 선언하지 않는다. 외부 게시 권한은 별도다.
 - 프로젝트 설정값과 선택형 checker 규약의 예시는 [examples/AGENTS.md](examples/AGENTS.md)에 있다. 예시의 자리표시자를 실제 값이나 승인으로 취급하지 않는다.
+
+## 개발 검증
+
+변경한 checkout의 회귀 시험은 Graphify가 준비된 Python 환경과 Node.js를 사용해 실행한다.
+
+```sh
+python -B -m unittest discover -s tests -v
+shasum -a 256 -c SHA256SUMS
+```
+
+시험은 각 실행 범위의 결과로 기록한다. 실제 Obsidian 저장·재읽기, 설치, 관계 갱신과 브라우저 동작은 별도로 관찰한다.

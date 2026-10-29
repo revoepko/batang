@@ -43,7 +43,8 @@ class Imports(unittest.TestCase):
         copied, body = ops.parse_document((self.target / "copy.md").read_bytes())
         self.assertEqual(body, self.original)
         self.assertEqual(copied["subject"], "합성 문서")
-        self.assertEqual(copied["sources"][0]["path"], str(self.source / "note.md"))
+        self.assertTrue(copied["sources"][0]["path"].startswith("batang-source://"))
+        self.assertEqual(ops.resolve_source_uri(copied["sources"][0]["path"], result.source_root_binding), (str(self.source), "note.md"))
         self.assertEqual(copied["sources"][0]["sha256"], ops.sha256(self.original))
         self.assertIsNone(copied["sources"][0]["raw_path"])
         self.assertEqual(result.provenance["source_sha256"], ops.sha256(self.original))
@@ -115,12 +116,12 @@ class Imports(unittest.TestCase):
             self.assertEqual((self.source / "note.md").read_bytes(), original)
 
     def test_unsupported_yaml_is_held_without_source_changes_or_registration(self):
-        invalid = ("unknown: value", "subject: first\nsubject: second", "subject: &value anchored",
+        invalid = ("unknown: {nested: value}", "subject: first\nsubject: second", "subject: &value anchored",
                    "subject: *value", "subject: !!str text", "<<: *value", "subject: |\n  body",
-                   "subject: true", "subject: null", "subject: 2026-10-29", "subject: .NaN",
-                   "aliases: [plain, unquoted]", "aliases:\n  - good\n  - 1", "aliases: null",
+                   "subject: true", "subject: null", "subject: .NaN",
+                   "aliases:\n  - good\n  - 1", "aliases: null",
                    "aliases: [\"good\", 3]", "aliases: [\" \"]", "sources:\n  - id: nested",
-                   "subject:\n  nested: value", "subject: foo # comment", "aliases:\n  - good\n    - nested")
+                   "subject:\n  nested: value", "aliases:\n  - good\n    - nested")
         for header in invalid:
             with self.subTest(header=header):
                 original = ("---\n" + header + "\n---\nbody\n").encode()
@@ -132,12 +133,13 @@ class Imports(unittest.TestCase):
 
     def test_overlap_symlink_hardlink_and_name_collision_are_not_overwritten(self):
         same = ops.FileScope(self.source, ["note.md", "copy.md"])
-        with self.assertRaisesRegex(ops.FileError, "import_source_overlap"):
-            ops.prepare_import(self.source_scope, "note.md", same, "copy.md")
+        copied = ops.prepare_import(self.source_scope, "note.md", same, "copy.md")
+        self.assertEqual(copied.status, "prepared")
         (self.source / "sub").mkdir()
         nested = ops.FileScope(self.source / "sub", ["copy.md"])
+        self.assertEqual(ops.prepare_import(self.source_scope, "note.md", nested, "copy.md").status, "prepared")
         with self.assertRaisesRegex(ops.FileError, "import_source_overlap"):
-            ops.prepare_import(self.source_scope, "note.md", nested, "copy.md")
+            ops.prepare_import(self.source_scope, "note.md", self.source_scope, "note.md")
         os.link(self.source / "note.md", self.target / "copy.md")
         with self.assertRaisesRegex(ops.ConflictError, "import_same_inode"):
             self.prepare()
@@ -155,10 +157,10 @@ class Imports(unittest.TestCase):
     def test_source_parent_or_leaf_link_alias_is_rejected(self):
         alias = self.root / "source-alias"
         alias.symlink_to(self.source, target_is_directory=True)
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
             ops.prepare_import(ops.FileScope(alias, ["note.md"]), "note.md", self.target_scope, "copy.md")
         (self.source / "same.md").symlink_to(self.source / "note.md")
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
             ops.prepare_import(self.source_scope, "same.md", self.target_scope, "copy.md")
 
     def test_same_bytes_from_different_sources_are_not_deduplicated(self):

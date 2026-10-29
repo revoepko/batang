@@ -6,7 +6,7 @@
   <meta name="description" content="구조·절차·분기·비교를 서로 다른 사례로 설명하는 재사용 예제입니다.">
   <title>차근차근 보기 — 네 가지 설명 예제</title>
   <style>
-    :root { color-scheme: light; --paper: #f5f6ef; --surface: #fffef9; --ink: #243b31; --muted: #53675c; --line: #d3ddcf; --accent: #285d47; --soft: #e9f0e2; --focus: #80551e; }
+    :root { color-scheme: light; --paper: #f5f6ef; --surface: #fffef9; --ink: #243b31; --muted: #53675c; --line: #879b89; --accent: #285d47; --soft: #e9f0e2; --focus: #80551e; }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
     body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.8 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
@@ -15,19 +15,19 @@
     .skip { position: absolute; top: -100px; left: 16px; padding: 10px 16px; background: var(--ink); color: white; z-index: 2; }
     .skip:focus { top: 10px; }
     .wrap { width: min(1060px, calc(100% - 48px)); margin: auto; }
-    header { padding: 48px 0 28px; }
-    .eyebrow { font-size: 12px; letter-spacing: .13em; color: var(--accent); font-weight: 700; }
-    h1 { font-size: clamp(29px, 4.4vw, 46px); line-height: 1.4; letter-spacing: -.045em; font-weight: 600; margin: 12px 0 17px; }
+    header { padding: 32px 0 22px; }
+    h1 { font-size: clamp(29px, 4.4vw, 46px); line-height: 1.4; letter-spacing: -.045em; font-weight: 600; margin: 0 0 12px; }
     header p { max-width: 720px; color: var(--muted); font-size: 15px; margin: 0; }
     .notice { font-size: 12px; padding: 13px 17px; margin-top: 22px; border-left: 3px solid var(--accent); background: var(--soft); }
-    .example-picker { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
-    .example-picker button { flex: 1 1 180px; min-height: 48px; font: inherit; font-size: 14px; text-align: left; background: var(--surface); border: 1px solid var(--line); color: var(--ink); padding: 10px 16px; border-radius: 5px; cursor: pointer; }
+    .example-picker { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .example-picker button { min-width: 0; min-height: 48px; font: inherit; font-size: 14px; text-align: left; background: var(--surface); border: 1px solid var(--line); color: var(--ink); padding: 10px 16px; border-radius: 5px; cursor: pointer; }
     .example-picker button:hover { border-color: var(--accent); }
     .example-picker button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: white; }
+    .example-picker .show-all { grid-column: 1 / -1; justify-self: end; min-height: 36px; padding: 3px 12px; font-size: 13px; }
     main { padding-bottom: 36px; }
     .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 32px; min-width: 0; }
     article + article { margin-top: 32px; padding-top: 32px; border-top: 1px solid var(--line); }
-    .enhanced article { margin: 0; padding: 0; border: 0; }
+    .enhanced:not(.show-all) article { margin: 0; padding: 0; border: 0; }
     .article-head { display: flex; gap: 22px; align-items: baseline; margin-bottom: 20px; }
     .kind { color: var(--accent); font-size: 12px; min-width: 56px; }
     h2 { font-size: 25px; line-height: 1.5; letter-spacing: -.035em; margin: 0; }
@@ -47,10 +47,12 @@
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
     @media (max-width: 680px) {
       .wrap { width: calc(100% - 32px); }
-      header { padding-top: 30px; }
-      header p { font-size: 14px; }
-      .example-picker { gap: 8px; }
-      .example-picker button { flex: 1 1 calc(50% - 8px); padding: 10px; font-size: 13px; }
+      header { padding: 16px 0; }
+      h1 { font-size: 25px; line-height: 1.35; margin-bottom: 8px; }
+      .notice { font-size: 11px; line-height: 1.6; margin-top: 12px; padding: 8px 10px; }
+      header p { font-size: 13px; line-height: 1.65; }
+      .example-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+      .example-picker button { min-height: 44px; padding: 8px 10px; font-size: 13px; }
       .panel { padding: 22px 18px; }
       .article-head { gap: 8px; flex-direction: column; margin-bottom: 16px; }
       h2 { font-size: 22px; }
@@ -58,14 +60,23 @@
       .facts { grid-template-columns: 1fr; gap: 20px; }
       .compare { grid-template-columns: 1fr; gap: 10px; }
     }
+    @media print {
+      body { background: white; }
+      .skip, .example-picker, #selection-status { display: none !important; }
+      .wrap { width: 100%; }
+      header { padding: 0 0 20px; }
+      .panel { padding: 0; border: 0; }
+      #explanation-panel article[hidden] { display: block !important; }
+      #explanation-panel article + article { margin-top: 28px; padding-top: 28px; border-top: 1px solid var(--line); }
+      .article-head { break-after: avoid; }
+    }
     @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   </style>
 </head>
 <body>
   <a class="skip" href="#examples">본문으로 바로가기</a>
   <header class="wrap">
-    <span class="eyebrow">차근차근 보기</span>
-    <h1>이해하고 싶은 것에 맞춰,<br>설명의 모양을 고릅니다.</h1>
+    <h1>네 가지 설명 방식</h1>
     <p>구조는 연결을, 절차는 순서를, 분기는 조건을, 비교는 선택 기준을 보여 줍니다.</p>
     <div class="notice">네 사례는 설명을 위해 만든 가상 예제입니다. 실제 기관의 규칙·운영 현황·검증 결과를 뜻하지 않습니다.</div>
   </header>
@@ -82,6 +93,7 @@
       <button type="button" data-select-example="process" aria-controls="example-process" aria-pressed="false">절차 · 수리 접수</button>
       <button type="button" data-select-example="branch" aria-controls="example-branch" aria-pressed="false">분기 · 산책 경로</button>
       <button type="button" data-select-example="comparison" aria-controls="example-comparison" aria-pressed="false">비교 · 학습 방식</button>
+      <button type="button" class="show-all" data-show-all aria-controls="explanation-panel" aria-pressed="false">전체 보기</button>
     </nav>
     <div class="panel" id="explanation-panel">
       <article id="example-structure" data-example="structure" aria-labelledby="title-structure">
@@ -139,28 +151,67 @@
       const picker = document.querySelector('.example-picker');
       const panel = document.getElementById('explanation-panel');
       const status = document.getElementById('selection-status');
+      const allButton = picker.querySelector('button[data-show-all]');
       const buttons = Array.from(picker.querySelectorAll('button[data-select-example]'));
       const articles = Array.from(panel.querySelectorAll('article[data-example]'));
       // 연결이 불완전하면 전체 본문을 보존하고 선택 UI를 활성화하지 않는다.
-      if (!buttons.length || buttons.length !== articles.length ||
+      if (!allButton || !buttons.length || buttons.length !== articles.length ||
           new Set(buttons.map(button => button.dataset.selectExample)).size !== buttons.length ||
+          new Set(articles.map(article => article.id)).size !== articles.length ||
           !buttons.every(button => articles.some(article =>
             article.dataset.example === button.dataset.selectExample &&
             article.id === button.getAttribute('aria-controls')))) return;
 
       let selected;
-      function select(button, announce = true) {
-        if (selected === button) return;
-        const target = button.getAttribute('aria-controls');
-        articles.forEach(article => { article.hidden = article.id !== target; });
-        buttons.forEach(item => { item.setAttribute('aria-pressed', String(item === button)); });
-        selected = button;
+      function readView() {
+        let value;
+        try { value = decodeURIComponent(window.location.hash.slice(1)); }
+        catch { return null; }
+        if (value === 'view=all') return 'all';
+        const id = value.startsWith('view=') ? value.slice(5) : value;
+        return articles.some(article => article.id === id) ? id : null;
+      }
+      function writeView(id, replace = false) {
+        // DOM id와 다른 fragment를 써서 주소 변경이 앵커 스크롤을 일으키지 않게 한다.
+        const hash = '#view=' + encodeURIComponent(id);
+        if (window.location.hash === hash) return;
+        const url = window.location.pathname + window.location.search + hash;
+        window.history[replace ? 'replaceState' : 'pushState'](window.history.state, '', url);
+      }
+      function select(id, announce = true) {
+        if (selected === id) return;
+        const showAll = id === 'all';
+        articles.forEach(article => { article.hidden = !showAll && article.id !== id; });
+        buttons.forEach(button => {
+          button.setAttribute('aria-pressed', String(!showAll && button.getAttribute('aria-controls') === id));
+        });
+        allButton.setAttribute('aria-pressed', String(showAll));
+        panel.classList.toggle('show-all', showAll);
+        selected = id;
         if (announce) {
-          status.textContent = document.getElementById(target).querySelector('h2').textContent;
+          status.textContent = showAll ? '모든 예제를 표시합니다.' :
+            document.getElementById(id).querySelector('h2').textContent;
         }
       }
-      buttons.forEach(button => { button.addEventListener('click', () => select(button)); });
-      select(buttons[0], false);
+      buttons.forEach(button => {
+        button.addEventListener('click', () => {
+          const id = button.getAttribute('aria-controls');
+          select(id);
+          writeView(id);
+        });
+      });
+      allButton.addEventListener('click', () => { select('all'); writeView('all'); });
+      function restoreView() {
+        const id = readView();
+        if (id) { select(id); writeView(id, true); }
+        else if (!window.location.hash) select(articles[0].id);
+      }
+      window.addEventListener('popstate', restoreView);
+      window.addEventListener('hashchange', restoreView);
+      const initial = readView();
+      // 이전의 #article-id 링크도 읽되 기본 앵커 이동 전에 상태 주소로 바꾼다.
+      if (initial) writeView(initial, true);
+      select(initial || articles[0].id, false);
       panel.classList.add('enhanced');
       picker.hidden = false;
     })();

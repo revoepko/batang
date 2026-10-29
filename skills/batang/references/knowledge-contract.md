@@ -6,7 +6,7 @@
 
 ## v1·v2 정규 frontmatter
 
-필수 최상위 key는 아래 일곱 개이며 선택 key `aliases`를 허용한다. 각 줄은 `key: JSON값`이며 `---` 줄로 감싼다. 범용 YAML은 지원하지 않는다. `parse_document`·`serialize_document`는 누락·중복·미지원 key와 잘못된 타입을 거부한다. 기존 비정규 YAML을 부분 해석해 덮어쓰지 않는다.
+필수 최상위 key는 아래 일곱 개이며 선택 key `aliases`와 지원하는 일반 속성을 보존한다. `---`로 감싼 frontmatter에서 Obsidian 속성의 문자열·유한 숫자·boolean·null·날짜 문자열과 flow/block 목록, 관리 출처에 필요한 목록·객체를 읽는다. 범용 YAML은 지원하지 않는다. 중복 키·anchor·tag·merge key·복합 키와 지원하지 않는 복잡 구조는 키와 이유를 확인해 보류하며 값이나 본문을 버리지 않는다. `parse_document`·`serialize_document`는 관리 필수 키가 빠졌거나 타입이 틀리면 거부한다.
 
 | key | 계약 |
 |---|---|
@@ -26,13 +26,15 @@ v2의 source `id`·`origin`은 빈 문자열 아닌 문자열이다. `path`·`sh
 
 호스트가 **신규** metadata를 만들 때 내부 `new_metadata(subject, content_kind, sources, *, tags=..., legacy_refs=..., aliases=...)`를 사용할 수 있다. v2와 새 UUID를 만들고, `tags`·`legacy_refs` 인자를 미제공한 경우에만 빈 배열을 채운다. 명시 `null`은 거부한다. `aliases` 인자가 누락되면 key를 만들지 않고 명시 인자는 검증해 보존한다. 이 함수는 저장·승인·기존 문서 변환을 수행하지 않는다. 저장된 v1·v2는 일곱 key가 모두 있어야 하며 읽기 시 기본값을 보충하지 않는다.
 
+신규 복제의 `sources[].path`는 `batang-source://<source_root_id>/<인코딩된 상대 경로>`를 사용한다. 루트 ID와 실제 위치의 `source_roots` 매핑은 로컬 프로젝트 설정에 두며 매핑은 읽기 권한이 아니다. 기존 절대 경로·v1/v2 출처는 자동 변경하지 않는다. 원문을 읽을 때는 명시 허용 목록과 [파일·출처 접근](source-access.md)을 따르며, 매핑이 없으면 추측하지 않는다.
+
 `sources[].sha256`는 원문을 관측한 당시 hash이며 현재 raw 파일 hash나 현재 지식 문서 hash가 아니다. `legacy_refs[].sha256`는 참조한 과거 파일의 확인한 hash다. stage/status/call·모델 이력은 지식의 확신 등급이 아니며 별도 신뢰도 필드를 만들지 않는다. 파일 hash·형식 검사가 의미 검토 완료를 뜻하지 않는다.
 
 ## 본문·인용·no-op
 
 본문은 frontmatter 종료 줄 다음 byte부터다. 본문 bytes를 그대로 전달하고 디코딩·재인코딩·줄바꿈 정규화하지 않는다. `split_frontmatter`는 경계만 분리하며 YAML 의미를 해석하지 않는다.
 
-기존 파일을 명시 수정할 때 `serialize_document(metadata, body, original=읽은bytes)`를 사용하면 metadata와 본문이 같을 때 원래 bytes를 반환한다. CRLF frontmatter도 no-op에서 보존된다. 변경이 있을 때만 정규 JSON 값 frontmatter를 생성한다. aliases 변경 시에도 ID·schema·본문과 변경하지 않은 metadata를 보존한다. 미지원 기존 형식은 이 인자로도 우회 변환하지 않는다.
+기존 파일을 명시 수정할 때 `serialize_document(metadata, body, original=읽은bytes)`를 사용하면 metadata와 본문이 같을 때 원래 bytes를 반환한다. CRLF frontmatter도 no-op에서 보존된다. 변경이 있을 때만 JSON 호환 값의 frontmatter를 생성하며 지원되는 추가 속성도 보존한다. aliases 변경 시에도 ID·schema·본문과 변경하지 않은 metadata를 보존한다. 미지원 기존 형식은 이 인자로도 우회 변환하지 않는다.
 
 직접 인용은 `verify_quote(source_bytes, start_byte, end_byte, quote)`로 선택한 byte 구간을 대조할 수 있다. 시작 포함·끝 제외다. 반복 문구도 명시 구간을 사용하며 Unicode 정규화·공백 보정·유사 매칭은 하지 않는다. byte 일치와 날짜·부정·조건·의미 대조는 별개다.
 

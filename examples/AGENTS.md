@@ -1,6 +1,6 @@
 # Codex project instructions example
 
-This Markdown is for Codex to read. It is not a machine-readable configuration file and this package has no YAML loader. Copy or merge only the sections needed into the target project's existing `AGENTS.md`; do not replace the whole file. Use paths confirmed for that project and vault.
+This Markdown is for Codex to read. It is not a machine-readable configuration file and this package has no YAML configuration loader. Copy or merge only the sections needed into the target project's existing `AGENTS.md`; do not replace the whole file. Use paths confirmed for that project and vault.
 
 ## Batang values
 
@@ -12,9 +12,11 @@ batang:
   graphify_executable: /absolute/path/to/graphify
   graph_output: /absolute/path/to/approved-output/graph.json
   archify_executable: /absolute/path/to/archify.mjs
+  source_roots:
+    123e4567-e89b-42d3-a456-426614174000: /absolute/path/to/selected-source-root
 ```
 
-The project owner selects and prepares `backup_root` in an approved location; the file helper does not create parent directories. `graph_output` is an absolute path to a JSON file. The Graphify executable and Archify script must already be available at their configured paths. Archify uses the host's existing Node runtime; do not add a wrapper or installer. Tested external versions and runtime notes are in [THIRD_PARTY.md](../THIRD_PARTY.md).
+Use `source_roots` only for source roots that the user has selected. Map the generated root identifier to the corresponding actual local path; do not put that absolute path in shared notes. A mapping is not permission to read the source. The project owner selects and prepares `backup_root` in an approved location; the file helper does not create parent directories. `graph_output` is an absolute path to a JSON file. The Graphify executable and Archify script must already be available at their configured paths. Archify uses the host's existing Node runtime; do not add a wrapper or installer. Tested external versions and runtime notes are in [THIRD_PARTY.md](../THIRD_PARTY.md).
 
 `active_index` names the list of Markdown files allowed for the workflow. For example, `ACTIVE.md` can contain:
 
@@ -33,7 +35,7 @@ For role recommendations, allowed alternatives, reasoning levels, and selection 
 - If the active list is missing or conflicts with the request, propose its exact path and included files. Create or replace it only after explicit approval.
 - If the user has no vault, ask for its name, parent directory, and whether to create it. Create only the agreed empty structure after explicit approval.
 - The host must have access to the selected Obsidian Markdown and prepared Graphify and Archify paths before setup is considered ready. Obsidian app registration or opening is separate; the host reads Markdown directly. Graphify supports relationship work and approved refreshes. Run Archify only for a requested explanation or diagram.
-- Do not search arbitrary paths, install or upgrade tools, or switch providers. If a configured tool is unavailable, report the missing path or access.
+- During ordinary use, do not search arbitrary paths, install or upgrade tools, or switch providers. If a configured tool is unavailable, report the missing path or access. For an explicit setup request, follow [installation instructions](../AGENTS.md) and prepare missing tools only within the user-selected or already approved scope.
 - Register only the Batang skill. For a task that uses Madi, read its internal workflow from the same checkout and revision. Verify every file against the root `SHA256SUMS`, then record that file's SHA-256 as the bundle identity. Keep release `candidate-manifest.json` and archive hashes as separate candidate evidence.
 - Preserve existing profiles, in-progress runs, knowledge files, and installed registrations. Do not silently move them to a newer checkout.
 

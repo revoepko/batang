@@ -6,17 +6,50 @@ import ctypes
 import errno
 import fcntl
 import hashlib
+import importlib.util
 import json
+import math
 import os
+from pathlib import Path
 import re
 import stat
 import sys
 import tempfile
 import uuid
+from urllib.parse import quote, unquote, urlsplit
+
+
+def _internal_module(name):
+    """호출 경로에 무관하게 같은 고정본의 순수 데이터 모듈만 불러온다."""
+    spec = importlib.util.spec_from_file_location(__name__ + "_" + name,
+                                                Path(__file__).with_name(name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_yaml_data = _internal_module("yaml_data")
+_link_data = _internal_module("link_data")
 
 
 class FileError(ValueError):
     """원문 내용이나 민감 경로를 포함하지 않는 계약 오류."""
+
+    def __init__(self, code, *, key=None, line=None):
+        self.code, self.key, self.line = code, key, line
+        if code.startswith(("yaml_", "frontmatter_", "metadata_", "import_yaml")):
+            message = "속성 형식을 확인해 주세요. 문제가 있는 값은 자동으로 고치지 않습니다."
+        elif code in ("private_staging_unavailable", "staging_path"):
+            message = "임시 위치의 소유자 전용 권한과 대상과 같은 파일시스템인지 확인해 주세요."
+        elif "link" in code or code == "path_symlink":
+            message = "심볼릭 링크나 참조 경로를 확인해 주세요. 안전 검사를 우회하지 않습니다."
+        elif "collision" in code or "changed" in code or "identity" in code:
+            message = "파일이 바뀌었거나 대상이 충돌했습니다. 현재 파일을 다시 확인해 주세요."
+        else:
+            message = "해당 항목의 설정과 허용 범위를 확인해 주세요."
+        detail = (" [속성: " + json.dumps(key, ensure_ascii=False) + "]") if key is not None else ""
+        detail += (" [줄: " + str(line) + "]") if line is not None else ""
+        super().__init__(code + ": " + message + detail)
 
 
 class ConflictError(FileError):
@@ -35,9 +68,15 @@ def sha256(data):
 
 
 def validate_metadata(metadata):
-    if (not isinstance(metadata, dict) or not set(KEYS).issubset(metadata)
-            or not set(metadata).issubset(KEYS + OPTIONAL_KEYS)):
+    if not isinstance(metadata, dict) or not set(KEYS).issubset(metadata):
         raise FileError("metadata_keys")
+    for key, value in metadata.items():
+        if not isinstance(key, str) or not key or any(c in key for c in "\x00\r\n"):
+            raise FileError("metadata_key")
+        if key not in KEYS + OPTIONAL_KEYS:
+            if key.startswith("batang_"):
+                raise FileError("metadata_reserved_key", key=key)
+            _validate_property(value, key)
     version = metadata["batang_schema_version"]
     if type(version) is not int or version not in (1, 2):
         raise FileError("schema_version")
@@ -65,10 +104,20 @@ def validate_metadata(metadata):
                     raise FileError("metadata_ref")
                 if field == "sha256" and not SHA256.fullmatch(value):
                     raise FileError("metadata_ref")
+                if field == "path" and value.startswith("batang-source:"):
+                    _decode_source_uri(value)
+
+
+def _validate_property(value, key):
+    def scalar(item):
+        return (item is None or type(item) in (str, bool, int)
+                or (type(item) is float and math.isfinite(item)))
+    if not scalar(value) and not (isinstance(value, list) and all(scalar(item) for item in value)):
+        raise FileError("metadata_property_unsupported", key=key)
 
 
 def new_metadata(subject, content_kind, sources, *, tags=_MISSING, legacy_refs=_MISSING,
-                 aliases=_MISSING):
+                 aliases=_MISSING, properties=None):
     """호스트의 신규 v2 입력만 생성한다. 저장·기존 문서 변환·권한 판단은 하지 않는다."""
     metadata = {"batang_schema_version": 2, "batang_id": str(uuid.uuid4()),
                 "subject": subject, "tags": [] if tags is _MISSING else copy.deepcopy(tags),
@@ -76,6 +125,10 @@ def new_metadata(subject, content_kind, sources, *, tags=_MISSING, legacy_refs=_
                 "legacy_refs": [] if legacy_refs is _MISSING else copy.deepcopy(legacy_refs)}
     if aliases is not _MISSING:
         metadata["aliases"] = copy.deepcopy(aliases)
+    if properties is not None:
+        if not isinstance(properties, dict) or set(properties).intersection(KEYS + OPTIONAL_KEYS):
+            raise FileError("metadata_property_collision")
+        metadata.update(copy.deepcopy(properties))
     validate_metadata(metadata)
     return metadata
 
@@ -95,37 +148,47 @@ def split_frontmatter(data):
     raise FileError("frontmatter_unclosed")
 
 
+def _typed_equal(left, right):
+    """숫자와 체크박스처럼 Python ==가 같게 보는 다른 데이터 타입도 구분한다."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(_typed_equal(left[key], right[key]) for key in left)
+    if isinstance(left, list):
+        return len(left) == len(right) and all(_typed_equal(a, b) for a, b in zip(left, right))
+    return left == right
+
+
 def serialize_document(metadata, body, *, original=None):
     validate_metadata(metadata)
     if not isinstance(body, bytes):
         raise FileError("body_bytes")
     if original is not None:
         previous_metadata, previous_body = parse_document(original)
-        if previous_metadata == metadata and previous_body == body:
+        if _typed_equal(previous_metadata, metadata) and previous_body == body:
             return original
+    keys = tuple(key for key in KEYS + OPTIONAL_KEYS if key in metadata) + tuple(
+        key for key in metadata if key not in KEYS + OPTIONAL_KEYS)
     header = "---\n" + "".join(
-        key + ": " + json.dumps(metadata[key], ensure_ascii=False, allow_nan=False,
+        (key if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", key)
+         else json.dumps(key, ensure_ascii=False)) + ": " + json.dumps(metadata[key], ensure_ascii=False, allow_nan=False,
                                  separators=(",", ":")) + "\n"
-        for key in KEYS + OPTIONAL_KEYS if key in metadata) + "---\n"
+        for key in keys) + "---\n"
     return header.encode("utf-8") + body
 
 
 def parse_document(data):
     header, body = split_frontmatter(data)
-    metadata = {}
-    try:
-        # JSON 문자열 안의 U+0085/U+2028/U+2029는 metadata 값이며 줄 경계가 아니다.
-        for line in header.decode("utf-8").removesuffix("\n").split("\n"):
-            key, value = line.split(": ", 1)
-            if key not in KEYS + OPTIONAL_KEYS or key in metadata:
-                raise FileError("frontmatter_key")
-            metadata[key] = json.loads(value, object_pairs_hook=_unique_object)
-    except (UnicodeError, ValueError) as exc:
-        if isinstance(exc, FileError):
-            raise
-        raise FileError("frontmatter_unsupported") from None
+    metadata = _load_metadata(header)
     validate_metadata(metadata)
     return metadata, body
+
+
+def _load_metadata(header):
+    try:
+        return _yaml_data.load(header)
+    except _yaml_data.DataError as exc:
+        raise FileError(exc.code, key=exc.key, line=exc.line) from None
 
 
 def _unique_object(pairs):
@@ -170,10 +233,89 @@ class ImportResult:
     provenance: dict
     references: tuple
     source_identity: tuple
+    source_root_binding: dict = None
 
 
 def _scope_root(scope):
     return "/" + "/".join(scope.root_parts)
+
+
+def _root_id(value):
+    try:
+        result = str(uuid.UUID(value))
+    except (ValueError, TypeError, AttributeError):
+        raise FileError("source_root_id") from None
+    if value != result:
+        raise FileError("source_root_id")
+    return result
+
+
+def source_uri(source_root_id, relative_path):
+    root_id = _root_id(source_root_id)
+    parts = _parts(relative_path)
+    return "batang-source://" + root_id + "/" + "/".join(quote(part, safe="-._~") for part in parts)
+
+
+def _decode_source_uri(value):
+    if not isinstance(value, str):
+        raise FileError("source_uri")
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        raise FileError("source_uri") from None
+    if (parsed.scheme != "batang-source" or parsed.query or parsed.fragment
+            or not parsed.path.startswith("/") or "@" in parsed.netloc or ":" in parsed.netloc):
+        raise FileError("source_uri")
+    root_id = _root_id(parsed.netloc)
+    if re.search(r"%(?:2f|5c|00)", parsed.path, re.I):
+        raise FileError("source_uri_path")
+    try:
+        relative = unquote(parsed.path[1:], errors="strict")
+    except UnicodeError:
+        raise FileError("source_uri_path") from None
+    _parts(relative)
+    if source_uri(root_id, relative) != value:
+        raise FileError("source_uri_canonical")
+    return root_id, relative
+
+
+def resolve_source_uri(value, source_roots):
+    """로컬 참조를 해석할 뿐 파일을 읽거나 네트워크에 접근하지 않는다."""
+    if not isinstance(source_roots, dict):
+        raise FileError("source_roots")
+    root_id, relative = _decode_source_uri(value)
+    if root_id not in source_roots:
+        raise FileError("source_root_unmapped")
+    root = source_roots[root_id]
+    _parts(root, absolute=True)
+    return os.fspath(root), relative
+
+
+def read_source_reference(source, source_roots, scopes):
+    """root mapping은 권한이 아니다. 읽기는 별도 명시 FileScope에 한정한다."""
+    path = source.get("path") if isinstance(source, dict) else None
+    if not isinstance(path, str) or not path:
+        raise FileError("source_unlocated")
+    scopes = tuple(scopes.values()) if isinstance(scopes, dict) else tuple(scopes)
+    if path.startswith("batang-source:"):
+        root, relative = resolve_source_uri(path, source_roots)
+        candidates = [(scope, relative) for scope in scopes if _scope_root(scope) == root
+                      and _parts(relative) in scope.allowed]
+    elif path.startswith("/"):
+        parts = _parts(path, absolute=True)
+        candidates = [(scope, "/".join(parts[len(scope.root_parts):])) for scope in scopes
+                      if parts[:len(scope.root_parts)] == scope.root_parts
+                      and parts[len(scope.root_parts):] in scope.allowed]
+    else:
+        parts = _parts(path)
+        candidates = [(scope, path) for scope in scopes if parts in scope.allowed]
+    if len(candidates) != 1:
+        raise FileError("source_read_scope")
+    snapshot = candidates[0][0].read(candidates[0][1])
+    expected = source.get("sha256")
+    if expected is not None and snapshot.sha256 != expected:
+        raise ConflictError("source_reference_changed")
+    return snapshot
 
 
 def _source_snapshot(scope, path):
@@ -198,87 +340,19 @@ def verify_import_source(source_scope, result):
     return True
 
 
-def _yaml_string(raw):
-    """제한 입력만 받는다. 일반 YAML의 의미 추론이나 자동 타입 변환은 하지 않는다."""
-    raw = raw.strip()
-    if raw.startswith('"'):
-        try:
-            value = json.loads(raw)
-        except ValueError:
-            raise FileError("import_yaml_unsupported") from None
-        if not isinstance(value, str):
-            raise FileError("import_yaml_unsupported")
-        return value
-    if raw.startswith("'") and raw.endswith("'"):
-        value = raw[1:-1]
-        if "'" in value.replace("''", ""):
-            raise FileError("import_yaml_unsupported")
-        return value.replace("''", "'")
-    if (not raw or any(character in raw for character in ":#[]{}&,*!|>%@`\"'\t")
-            or raw.startswith(("-", "?"))
-            or raw.lower() in ("null", "~", "true", "false", "yes", "no", "on", "off")
-            or re.match(r"^[+-]?(?:[0-9]|\.[0-9])", raw)
-            or raw.lower() in (".nan", ".inf", "+.inf", "-.inf")):
-        raise FileError("import_yaml_unsupported")
-    return raw
-
-
 def _limited_yaml(header):
-    try:
-        lines = header.decode("utf-8").split("\n")
-    except UnicodeError:
-        raise FileError("import_yaml_unsupported") from None
-    result = {}
-    position = 0
-    while position < len(lines):
-        line = lines[position].removesuffix("\r")
-        position += 1
-        if not line:
-            continue
-        match = re.fullmatch(r"([a-z_]+):(?: (.*))?", line)
-        if not match:
-            raise FileError("import_yaml_unsupported")
-        key, raw = match.groups()
-        if key not in KEYS + OPTIONAL_KEYS or key in result:
-            raise FileError("import_yaml_unsupported")
-        if key in ("tags", "aliases"):
-            if raw is None or raw == "":
-                value = []
-                while position < len(lines):
-                    item = re.fullmatch(r"  - (.+)", lines[position].removesuffix("\r"))
-                    if not item:
-                        break
-                    value.append(_yaml_string(item.group(1)))
-                    position += 1
-                if not value:
-                    raise FileError("import_yaml_unsupported")
-            else:
-                try:
-                    value = json.loads(raw)
-                except ValueError:
-                    raise FileError("import_yaml_unsupported") from None
-                if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-                    raise FileError("import_yaml_unsupported")
-        elif key in ("sources", "legacy_refs", "batang_schema_version"):
-            try:
-                value = json.loads(raw, object_pairs_hook=_unique_object)
-            except (ValueError, TypeError):
-                raise FileError("import_yaml_unsupported") from None
-        else:
-            value = _yaml_string(raw or "")
-        result[key] = value
-    return result
+    return _load_metadata(header)
 
 
-def _import_metadata(data, source_path, source_hash, subject, content_kind):
+def _import_metadata(data, source_path, source_hash, subject, content_kind, *, private_source_uri):
     if data.startswith((b"---\n", b"---\r\n")):
         header, body = split_frontmatter(data)
-        try:
-            metadata, body = parse_document(data)
-        except FileError:
-            metadata = _limited_yaml(header)
-            if ("batang_schema_version" in metadata or "batang_id" in metadata) and not set(KEYS).issubset(metadata):
+        metadata = _load_metadata(header)
+        if ("batang_schema_version" in metadata or "batang_id" in metadata
+                or {"sources", "legacy_refs"}.issubset(metadata)):
+            if not set(KEYS).issubset(metadata):
                 raise FileError("import_managed_metadata_incomplete")
+            validate_metadata(metadata)
     else:
         metadata, body = {}, data
     # 기존 속성을 바꾸지 않고 없는 필수 키만 신규 문서 기본값으로 채운다.
@@ -289,7 +363,7 @@ def _import_metadata(data, source_path, source_hash, subject, content_kind):
     metadata.setdefault("content_kind", content_kind)
     metadata.setdefault("tags", [])
     metadata.setdefault("legacy_refs", [])
-    metadata.setdefault("sources", [{"id": str(uuid.uuid4()), "path": "/" + "/".join(source_path),
+    metadata.setdefault("sources", [{"id": str(uuid.uuid4()), "path": private_source_uri,
                                     "origin": "user", "sha256": source_hash, "raw_path": None}])
     validate_metadata(metadata)
     # strict 문서는 CRLF, 순서와 formatting까지 no-op으로 보존한다.
@@ -300,62 +374,58 @@ def _import_metadata(data, source_path, source_hash, subject, content_kind):
     return metadata, body, serialize_document(metadata, body, original=data)
 
 
-def _import_references(data, source_scope, source_path, selected_sources):
-    """선택된 경로의 존재만 확인한다. 첨부 수집·범위 밖 stat/read는 하지 않는다."""
-    try:
-        text = data.decode("utf-8")
-    except UnicodeError:
-        raise FileError("import_encoding") from None
-    matches = [(match.start(), match.group(1)) for match in re.finditer(r"!?\[\[([^]\n]+)\]\]", text)]
-    matches += [(match.start(), match.group(1)) for match in re.finditer(r"!?\[[^]\n]*\]\(([^)\n]+)\)", text)]
-    selected = {_parts(path) for path in selected_sources}
-    if not selected.issubset(source_scope.allowed):
+def _vault_prefix(scope, source_vault_root):
+    vault = scope.root_parts if source_vault_root is None else _parts(source_vault_root, absolute=True)
+    if scope.root_parts[:len(vault)] != vault:
+        raise FileError("import_vault_scope")
+    return "/".join(scope.root_parts[len(vault):])
+
+
+def inspect_import_links(data, source_scope, source_path, selected_sources, *, source_vault_root=None):
+    """명시 선택 표 안에서만 참조를 대조한다. 선택 밖 stat/read는 하지 않는다."""
+    selected = tuple(selected_sources)
+    if not {_parts(path) for path in selected}.issubset(source_scope.allowed):
         raise FileError("import_reference_scope")
-    references = []
-    for _, raw in sorted(matches):
-        target = raw.split("|", 1)[0].split("#", 1)[0]
-        if not target:
-            continue
-        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target):
-            references.append({"reference": raw, "status": "unverified"})
-            continue
-        parts = list(_parts(source_path)[:-1])
-        unsafe = target.startswith("/") or "\\" in target or "\x00" in target
-        for part in target.split("/"):
-            if part in ("", "."):
-                continue
-            if part == "..":
-                if not parts:
-                    unsafe = True
-                else:
-                    parts.pop()
-            else:
-                parts.append(part)
-        normalized = tuple(parts)
-        if normalized not in selected and target and not os.path.splitext(target)[1]:
-            candidate = tuple(parts[:-1] + [parts[-1] + ".md"]) if parts else ()
-            if candidate in selected:
-                normalized = candidate
-        status = "unverified"
-        if not unsafe and normalized in selected:
+    try:
+        references = _link_data.inventory(data, source_path, selected,
+                            vault_prefix=_vault_prefix(source_scope, source_vault_root))
+    except (UnicodeError, ValueError):
+        raise FileError("import_reference_format") from None
+    result = []
+    for reference in references:
+        reference = dict(reference)
+        if reference["status"] == "selected":
             try:
-                source_scope.read("/".join(normalized))
+                source_scope.read(reference["source_path"])
             except (OSError, FileError):
-                status = "broken"
-            else:
-                status = "selected"
-        references.append({"reference": raw, "status": status})
-    return tuple(references)
+                reference["status"] = "broken"
+        result.append(reference)
+    return tuple(result)
+
+
+def _import_references(data, source_scope, source_path, selected_sources):
+    return inspect_import_links(data, source_scope, source_path, selected_sources)
 
 
 def prepare_import(source_scope, source_path, target_scope, target_path, *, subject=None,
                    content_kind="note", registered_documents=(), prior_imports=(),
-                   selected_sources=()):
+                   selected_sources=(), source_root_id=None, source_vault_root=None,
+                   target_mapping=None, target_vault_root=None):
     """선택한 원본의 독립 복제만 만든다. ACTIVE 편집·동기화·실패 복제 삭제는 하지 않는다."""
     source_parts = source_scope.root_parts + _parts(source_path)
     target_parts = target_scope.root_parts + _parts(target_path)
-    if target_parts[:len(source_scope.root_parts)] == source_scope.root_parts:
+    selected_sources = tuple(selected_sources)
+    selected_parts = {_parts(path) for path in selected_sources} | {_parts(source_path)}
+    if not selected_parts.issubset(source_scope.allowed):
+        raise FileError("import_reference_scope")
+    if target_parts in {source_scope.root_parts + parts for parts in selected_parts}:
         raise FileError("import_source_overlap")
+    mapping = {} if target_mapping is None else dict(target_mapping)
+    if (not {_parts(path) for path in mapping}.issubset(selected_parts)
+            or not {_parts(path) for path in mapping.values()}.issubset(target_scope.allowed)
+            or len(set(mapping.values())) != len(mapping)
+            or (source_path in mapping and mapping[source_path] != target_path)):
+        raise FileError("import_destination_mapping")
     snapshot, identity = _source_snapshot(source_scope, source_path)
     provenance = {"source_root": _scope_root(source_scope), "source_path": source_path,
                   "source_sha256": snapshot.sha256, "source_file_identity": identity[:2]}
@@ -381,7 +451,8 @@ def prepare_import(source_scope, source_path, target_scope, target_path, *, subj
                 if value["batang_id"] != prior.metadata["batang_id"]:
                     raise ConflictError("import_registered_identity")
                 result = ImportResult("skipped", prior.target_root, path, saved.sha256,
-                                      value, provenance, prior.references, identity)
+                                      value, provenance, prior.references, identity,
+                                      prior.source_root_binding)
                 verify_import_source(source_scope, result)
                 return result
         raise ConflictError("import_registered_missing")
@@ -394,13 +465,25 @@ def prepare_import(source_scope, source_path, target_scope, target_path, *, subj
             if (existing.st_dev, existing.st_ino) == identity[:2]:
                 raise ConflictError("import_same_inode")
             raise ConflictError("import_target_collision")
+    root_id = str(uuid.uuid4()) if source_root_id is None else _root_id(source_root_id)
+    uri = source_uri(root_id, source_path)
     metadata, body, encoded = _import_metadata(snapshot.data, source_parts, snapshot.sha256,
-                                               subject, content_kind)
+                                               subject, content_kind, private_source_uri=uri)
+    binding = {root_id: _scope_root(source_scope)} if any(
+        source["path"] == uri for source in metadata["sources"]) else {}
     if any(value["batang_id"] == metadata["batang_id"] for _, _, _, value in registered):
         raise ConflictError("import_metadata_id_collision")
-    references = _import_references(body, source_scope, source_path, selected_sources)
+    references = inspect_import_links(body, source_scope, source_path, selected_sources,
+                                      source_vault_root=source_vault_root)
+    if target_mapping is not None:
+        try:
+            body, references = _link_data.rewrite(body, references, target_path, mapping,
+                                  target_vault_prefix=_vault_prefix(target_scope, target_vault_root))
+        except ValueError:
+            raise FileError("import_reference_format") from None
+        encoded = serialize_document(metadata, body, original=encoded)
     result = ImportResult("prepared", _scope_root(target_scope), target_path, sha256(encoded),
-                          metadata, provenance, references, identity)
+                          metadata, provenance, references, identity, binding)
     verify_import_source(source_scope, result)
 
     def transform(copied):
@@ -431,8 +514,217 @@ def prepare_import(source_scope, source_path, target_scope, target_path, *, subj
     return result
 
 
+def _anchor_present(snapshot, anchor):
+    try:
+        _, target_body = parse_document(snapshot.data)
+        content = target_body.decode("utf-8")
+    except (FileError, UnicodeError):
+        return None
+    ambiguous = []
+    html = []
+    visible = _link_data.markdown_content(content, uncertain_ranges=ambiguous, html_ranges=html)
+    if html:
+        return None
+    if re.search(r"<[A-Za-z/!]", visible):
+        return None
+    label = unquote(anchor[1:])
+    if label.startswith("^"):
+        block_id = label[1:]
+        if not re.fullmatch(r"[A-Za-z0-9-]+", block_id):
+            return False
+        found = list(re.finditer(r"(?:^|[ \t])\^" + re.escape(block_id) + r"[ \t\r]*$", visible, re.M))
+        if any(not any(match.start() < end and match.end() > start for start, end in ambiguous)
+               for match in found):
+            return True
+        return None if found else False
+    requested = [unquote(part).strip().casefold() for part in anchor[1:].split("#")]
+    if not requested or any(not part for part in requested):
+        return False
+    raw_visible = _link_data.markdown_content(content, inline_code=False)
+    # HTML 제목·여러 줄 코드 span·Setext·복잡한 inline 표현은 확정 대상으로 만들지 않는다.
+    uncertain = bool(ambiguous)
+    stack = []
+    line_offset = 0
+    for raw_line, line in zip(raw_visible.split("\n"), visible.split("\n")):
+        line_ambiguous = any(line_offset < end and line_offset + len(line) > start for start, end in ambiguous)
+        line_offset += len(line) + 1
+        if re.fullmatch(r" {0,3}(?:=+|-+)[ \t\r]*", line):
+            uncertain = True
+            depth = 1 if line.lstrip().startswith("=") else 2
+            while stack and stack[-1][0] >= depth:
+                stack.pop()
+            stack.append((depth, None))
+        match = re.fullmatch(r" {0,3}(#{1,6})(?:[ \t]+(.*?)|[ \t]*)\r?", line)
+        if not match:
+            continue
+        depth = len(match.group(1))
+        title = re.sub(r"[ \t]+#+[ \t]*$", "", match.group(2) or "").strip().casefold()
+        while stack and stack[-1][0] >= depth:
+            stack.pop()
+        if line_ambiguous or any(char in raw_line for char in "`*_[]<\\"):
+            title = None
+            uncertain = True
+        stack.append((depth, title))
+        if title != requested[-1]:
+            continue
+        parents = iter(value for _, value in reversed(stack[:-1]))
+        if all(any(parent == expected for parent in parents) for expected in reversed(requested[:-1])):
+            return True
+    return None if uncertain else False
+
+
+def verify_import_destinations(results, target_scope, *, target_vault_root=None):
+    """복제된 파일의 현재 내용과 각 링크의 실제 목적지를 다시 대조한다."""
+    results = tuple(results)
+    by_target = {result.target_path: result for result in results}
+    if len(by_target) != len(results):
+        raise FileError("import_destination_duplicate")
+    snapshots = {}
+    for path, result in by_target.items():
+        if result.target_root != _scope_root(target_scope):
+            raise FileError("import_destination_scope")
+        try:
+            saved = target_scope.read(path)
+        except (FileError, OSError):
+            continue
+        if saved.sha256 != result.target_sha256:
+            raise ConflictError("import_destination_changed")
+        snapshots[path] = saved
+    checked = []
+    for result in results:
+        if result.target_path not in snapshots:
+            checked.append({"target_path": result.target_path, "status": "missing"})
+            continue
+        if not result.metadata:
+            continue
+        metadata, body = parse_document(snapshots[result.target_path].data)
+        if metadata["batang_id"] != result.metadata["batang_id"]:
+            raise ConflictError("import_destination_identity")
+        actual = _link_data.inventory(body, result.target_path, snapshots,
+                                      vault_prefix=_vault_prefix(target_scope, target_vault_root))
+        for ref in result.references:
+            status = ref.get("destination_status", "unverified")
+            destination = ref.get("destination_path")
+            target = None
+            if status == "same_document":
+                destination = result.target_path
+                target = snapshots[destination]
+            if status == "mapped":
+                target = snapshots.get(destination)
+                found = [item for item in actual if item["reference"] == ref["destination_reference"]]
+                if target is None or not any(item.get("source_path") == destination for item in found):
+                    status = "broken"
+                else:
+                    status = "verified"
+            anchor = ref.get("anchor", "")
+            if target is not None and status in ("verified", "same_document") and anchor:
+                found_anchor = _anchor_present(target, anchor)
+                if found_anchor is None:
+                    status = "anchor_unverified"
+                elif not found_anchor:
+                    status = "broken_anchor"
+            checked.append({"target_path": result.target_path, "reference": ref["reference"],
+                            "destination_path": destination, "status": status})
+    return tuple(checked)
+
+
+def prepare_import_batch(source_scope, selected_sources, target_scope, target_mapping, *,
+                         source_root_id=None, source_vault_root=None, target_vault_root=None,
+                         registered_documents=(), prior_imports=(), attachment_paths=()):
+    """선택 항목 수와 처리 결과 수를 맞춘다. 등록과 그래프 반영은 호출자가 이어간다."""
+    selected = tuple(selected_sources)
+    if len(set(selected)) != len(selected) or set(target_mapping) != set(selected):
+        raise FileError("import_batch_selection")
+    if (not {_parts(path) for path in selected}.issubset(source_scope.allowed)
+            or not {_parts(path) for path in target_mapping.values()}.issubset(target_scope.allowed)
+            or len(set(target_mapping.values())) != len(target_mapping)
+            or not set(attachment_paths).issubset(selected)):
+        raise FileError("import_batch_scope")
+    source_paths = {source_scope.root_parts + _parts(path) for path in selected}
+    if any(target_scope.root_parts + _parts(path) in source_paths for path in target_mapping.values()):
+        raise FileError("import_source_overlap")
+    root_id = str(uuid.uuid4()) if source_root_id is None else _root_id(source_root_id)
+    entries, results = [], []
+    registered = list(registered_documents)
+    for path in selected:
+        entry = {"source_path": path, "target_path": target_mapping[path],
+                 "registration_status": "not_registered", "graph_status": "not_registered"}
+        try:
+            if path in attachment_paths:
+                snapshot, identity = _source_snapshot(source_scope, path)
+                provenance = {"source_root": _scope_root(source_scope), "source_path": path,
+                              "source_sha256": snapshot.sha256, "source_file_identity": identity[:2]}
+                result = ImportResult("prepared", _scope_root(target_scope), target_mapping[path],
+                                      snapshot.sha256, {}, provenance, (), identity, {root_id: _scope_root(source_scope)})
+                verify_import_source(source_scope, result)
+                target_scope.write(result.target_path, snapshot.data,
+                                   _before_publish=lambda: verify_import_source(source_scope, result))
+                saved = target_scope.read(result.target_path)
+                if saved.sha256 != result.target_sha256:
+                    raise ConflictError("import_target_changed")
+                verify_import_source(source_scope, result)
+                entry["kind"] = "attachment"
+            else:
+                result = prepare_import(source_scope, path, target_scope, target_mapping[path],
+                    source_root_id=root_id, source_vault_root=source_vault_root,
+                    target_mapping=target_mapping, target_vault_root=target_vault_root,
+                    registered_documents=registered, prior_imports=prior_imports, selected_sources=selected)
+                if not any(_scope_root(scope) == result.target_root and registered_path == result.target_path
+                           for scope, registered_path in registered):
+                    registered.append((target_scope, result.target_path))
+                entry["kind"] = "note"
+            entry.update(status=result.status, result=result)
+            results.append(result)
+        except (FileError, OSError) as exc:
+            entry.update(status="failed", error_code=getattr(exc, "code", "import_io_error"),
+                         error_message=str(exc) if isinstance(exc, FileError) else "파일 접근 또는 게시를 완료하지 못했습니다.")
+        entries.append(entry)
+    reference_error = None
+    try:
+        references = verify_import_destinations(results, target_scope, target_vault_root=target_vault_root)
+    except (FileError, OSError) as exc:
+        references = ()
+        reference_error = getattr(exc, "code", "import_io_error")
+    bindings = {root_id: _scope_root(source_scope)}
+    for result in results:
+        bindings.update(result.source_root_binding or {})
+    # 준비 시 성공했어도 마지막 대조에서 사라진 파일을 성공 집계에 남기지 않는다.
+    copy_validation = {}
+    for result in results:
+        try:
+            current = target_scope.read(result.target_path)
+        except FileNotFoundError:
+            status = "missing"
+        except (FileError, OSError):
+            status = "unverified"
+        else:
+            status = "verified" if current.sha256 == result.target_sha256 else "changed"
+        copy_validation[result.target_path] = status
+    for entry in entries:
+        if entry["status"] in ("prepared", "skipped"):
+            status = copy_validation[entry["target_path"]]
+            entry["copy_validation_status"] = status
+            if status != "verified":
+                entry["preparation_status"] = entry["status"]
+                entry.update(status="failed", error_code="import_destination_" + status,
+                             error_message="준비 후 복제본이 사라졌거나 변경됐습니다. 현재 파일을 확인해 주세요.")
+    valid_count = sum(entry["status"] in ("prepared", "skipped") for entry in entries)
+    return {"entries": tuple(entries), "selected_count": len(selected),
+            "prepared_count": valid_count, "source_root_binding": bindings,
+            "references": references,
+            "reference_check_error": reference_error,
+            "selection_accounted": len(entries) == len(selected),
+            "copies_complete": valid_count == len(selected) and reference_error is None,
+            "references_complete": (valid_count == len(selected) and reference_error is None
+                                     and all(ref["status"] in ("verified", "same_document") for ref in references)),
+            "registration_complete": False, "graph_complete": False}
+
+
 def _parts(value, absolute=False):
-    raw = os.fspath(value)
+    try:
+        raw = os.fspath(value)
+    except TypeError:
+        raise FileError("path_format") from None
     if not isinstance(raw, str) or "\\" in raw or "\x00" in raw:
         raise FileError("path_format")
     pieces = raw.split("/")
@@ -550,12 +842,13 @@ def _rename_new_at(source_parent, temporary, target_parent, name):
         raise OSError(code, "renameatx_np")
 
 
-def _open_staging_dir(target_parent, acl):
+def _open_staging_dir(target_parent, acl, staging_root=None):
     """같은 파일시스템의 소유자 전용 staging 디렉터리를 fd로 연다."""
     if acl is None:
         raise FileError("private_staging_unavailable")
     # /var 같은 시스템 symlink는 한 번 정규화하고 실제 경로는 모두 no-follow로 연다.
-    parts = _parts(os.path.realpath(tempfile.gettempdir()), absolute=True)
+    root = os.path.realpath(tempfile.gettempdir()) if staging_root is None else staging_root
+    parts = _parts(root, absolute=True)
     fd = _open_dir("/")
     try:
         for component in parts:
@@ -652,7 +945,7 @@ def _read_at(parent, name):
 
 
 class FileScope:
-    def __init__(self, root, explicit_relative_paths, *, cleanup_guard=None):
+    def __init__(self, root, explicit_relative_paths, *, cleanup_guard=None, staging_root=None):
         if isinstance(explicit_relative_paths, (str, bytes)):
             raise FileError("explicit_file_list")
         self.root_parts = _parts(root, absolute=True)
@@ -662,6 +955,9 @@ class FileScope:
         if cleanup_guard is not None and not callable(cleanup_guard):
             raise FileError("cleanup_guard_context")
         self.cleanup_guard = cleanup_guard
+        if staging_root is not None:
+            _parts(staging_root, absolute=True)
+        self.staging_root = staging_root
 
     @contextmanager
     def _parent(self, path):
@@ -676,6 +972,10 @@ class FileScope:
                 os.close(fd)
                 fd = following
             yield fd, parts[-1]
+        except OSError as exc:
+            if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                raise FileError("path_symlink") from None
+            raise
         finally:
             if fd is not None:
                 os.close(fd)
@@ -711,7 +1011,7 @@ class FileScope:
                 return False
             # 다른 플랫폼의 ACL 지원을 추가하지 않는다. Darwin 오류에는 fallback이 없다.
             acl = _MacOSACL() if sys.platform == "darwin" else None
-            staging_root = _open_staging_dir(parent, acl)
+            staging_root = _open_staging_dir(parent, acl, self.staging_root)
             descriptors.callback(os.close, staging_root)
             if previous is not None:
                 if backup_scope is None or backup_path is None:

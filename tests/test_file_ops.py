@@ -103,7 +103,7 @@ class Documents(unittest.TestCase):
                     self.assertEqual({key: actual[key] for key in ops.KEYS},
                                      {key: value[key] for key in ops.KEYS})
                     duplicate = encoded.replace(b"aliases: ", b"aliases: []\naliases: ")
-                    with self.assertRaisesRegex(ops.FileError, "frontmatter_key"):
+                    with self.assertRaisesRegex(ops.FileError, "frontmatter_duplicate"):
                         ops.parse_document(duplicate)
 
     def test_named_synthetic_fixtures_roundtrip_without_byte_change(self):
@@ -218,7 +218,7 @@ class Documents(unittest.TestCase):
             ops.parse_document(b"---\nsubject: plain-yaml\n---\n" + body)
 
     def test_unsupported_keys_duplicates_types_and_hashes_rejected(self):
-        for change in ({"confidence": "PASS"}, {"batang_schema_version": True},
+        for change in ({"confidence": {"nested": "unsupported"}}, {"batang_schema_version": True},
                        {"tags": "tag"}, {"subject": None}, {"legacy_refs": {}},
                        {"sources": [{"id": "missing-fields"}]}):
             value = metadata()
@@ -300,15 +300,15 @@ class Files(unittest.TestCase):
         outside.write_bytes(b"untouched")
         self.target.unlink()
         self.target.symlink_to(outside)
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
             self.scope.read("Knowledge/a.md")
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
             self.scope.write("Knowledge/a.md", b"bad")
         self.assertEqual(outside.read_bytes(), b"untouched")
         self.target.unlink()
         (self.root / "Knowledge").rmdir()
         (self.root / "Knowledge").symlink_to(self.root / "backups", target_is_directory=True)
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
             self.scope.write("Knowledge/new.md", b"bad")
         self.assertEqual(list((self.root / "backups").iterdir()), [])
 
@@ -316,7 +316,7 @@ class Files(unittest.TestCase):
         alias = self.root / "alias"
         alias.symlink_to(self.root / "Knowledge", target_is_directory=True)
         scope = ops.FileScope(alias, ["a.md"])
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
             scope.read("a.md")
 
     def test_nonregular_file_rejected(self):

@@ -2,6 +2,20 @@
 
 [한국어](RELEASE.ko.md)
 
+## 0.1.0-a
+
+### Changed
+
+- Read note content and supported properties again after editing in Obsidian. Additional properties are preserved; unsupported structures are kept for review with an explanation.
+- Import selected notes within the same vault. Originals remain unchanged, and Batang checks copied links and the status of each selected item.
+- Check registered notes and their relationship updates together. Notes remain readable if a relationship update cannot be completed, and the update can be checked again on a later related request.
+- Sources for newly imported notes use a locally resolvable reference in shared notes instead of the original folder's absolute path. Existing source records remain unchanged.
+- The explanation panel example now offers an all-content view, full printing, and links to individual items, with a more compact layout on small screens.
+
+### Compatibility
+
+- Open notes using the new source references and additional properties with Batang 0.1.0-a. Existing documents are not converted automatically.
+
 ## 0.1.0
 
 ### Added
