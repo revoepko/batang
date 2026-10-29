@@ -2,15 +2,13 @@
 
 # Batang
 
-Batang organizes selected material into source-linked knowledge and puts that knowledge to work in software, documentation, and diagrams.
+Batang helps you organize selected notes with links to their sources, then find and use that knowledge in software, documents, and diagrams.
 
-I wanted one workflow from gathering knowledge to making what I need. I designed it to grow by keeping source notes, tools, and work procedures distinct.
-
-I did not write the code or documentation myself. I shaped the features and scope through conversations with AI, then iterated on implementation and verification.
+[Release notes](RELEASE.md)
 
 ## Get started
 
-The supported environment for 0.0.9 is **Codex on macOS ARM64**. The required software is listed below.
+The supported environment is **Codex on macOS ARM64**. The required software is listed below.
 
 | Required software | Purpose |
 |---|---|
@@ -39,19 +37,20 @@ Codex records the confirmed paths in the target project's `AGENTS.md` and verifi
 
 | Example request | Expected result |
 |---|---|
-| “Use the notes I selected to update my decision note, with links to the source passages.” | A scoped update that links the requested note to its sources. |
-| “What did I decide about this topic? Compare the notes I selected and explain how they relate.” | A comparison of related notes that explains the decisions and their sources. |
-| “Use these notes to draft a short guide and make a diagram of the workflow.” | A guide and requested diagram based on the selected notes. |
+| “Make an explanation page where I can select topics to explore this content.” | A page that changes the content in the same area below the selection buttons. |
+| “Use these notes to update decision.md with my decision and its sources.” | A scoped update that links the requested note to its sources. |
+| “Find and compare the decisions I made about this topic in these notes.” | A comparison of related notes that explains the decisions and their sources. |
+| “Make a short guide and a workflow diagram from these notes.” | A guide and requested diagram based on the selected notes. |
 
 ## Batang's components
 
 | Component | What it does |
 |---|---|
-| [`Gadak`](skills/batang/components/gadak/workflow.md) | Sets the source, tool paths, and project policies for the work. |
-| [`Naru`](skills/batang/components/naru/workflow.md) | Connects Codex request handling to Batang's work procedures and prepared tools. |
-| [`Dure`](skills/batang/components/dure/workflow.md) | Defines allowed targets and the checks, backup, and recovery conditions before a change. |
-| [`Madi`](skills/batang/components/madi/workflow.md) | Plans and creates development, documentation, and diagram work, then connects an independent review. |
-| [`Supul`](skills/batang/components/supul/workflow.md) | Adds selected material, retrieves knowledge, and handles corrections. |
+| [`Gadak`](skills/batang/components/gadak/workflow.md) | Checks which notes and tools to use and whether the project is ready. |
+| [`Naru`](skills/batang/components/naru/workflow.md) | Chooses the knowledge, development, document, or diagram path for your request. |
+| [`Dure`](skills/batang/components/dure/workflow.md) | Checks which files may change and the backup and recovery conditions first. |
+| [`Madi`](skills/batang/components/madi/workflow.md) | Plans and creates development, document, or diagram work, then has another reviewer check it. |
+| [`Supul`](skills/batang/components/supul/workflow.md) | On request, saves selected material to notes, finds information, and helps correct it. |
 
 `Galpi`, `Gori`, and `Bogi` are responsibilities within `Supul`.
 
@@ -61,7 +60,7 @@ Codex records the confirmed paths in the target project's `AGENTS.md` and verifi
 | [`Gori`](skills/batang/components/supul/gori/workflow.md) | Shows relationships between notes and concepts. |
 | [`Bogi`](skills/batang/components/supul/bogi/workflow.md) | Creates explanations and diagrams when requested. |
 
-These are responsibilities within one Batang skill. The host AI connects the relevant procedures and existing tools for each request.
+These components belong to one Batang skill. The host AI connects the relevant procedures and tools you have prepared, and carries out the work.
 
 Batang answers from the notes you select. Relationship maps and diagrams are supporting material that helps explain them.
 
@@ -72,6 +71,10 @@ Batang answers from the notes you select. Relationship maps and diagrams are sup
 - When you ask for an update, it changes only the target you specify and makes a backup before editing an existing note.
 
 For details, see [Reading and saving notes](skills/batang/references/source-access.md) and [Note format and sources](skills/batang/references/knowledge-contract.md).
+
+You can also import notes written elsewhere. Batang converts copies of the selected notes to its format, records their sources, and leaves the originals unchanged. Notes that cannot be converted are not registered, and Batang tells you why. See [import guidance](skills/batang/references/import.md).
+
+You can give notes alternative names with `aliases`. The AI uses aliases of selected notes as clues to find related content. See [relationship guidance](skills/batang/components/supul/gori/workflow.md).
 
 ## License
 

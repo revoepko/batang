@@ -54,11 +54,20 @@ LOCAL_RELEASE_STATE = re.compile(
 PUBLIC_PROSE = {
     PACKAGE / "README.md",
     PACKAGE / "README.ko.md",
+    PACKAGE / "RELEASE.md",
+    PACKAGE / "RELEASE.ko.md",
     PACKAGE / "AGENTS.md",
     PACKAGE / "THIRD_PARTY.md",
     PACKAGE / "examples" / "AGENTS.md",
     MADI / "workflow.md",
     *INTERNAL_WORKFLOWS,
+}
+OPERATIONS_PUBLIC_FILES = {
+    "RELEASE.md",
+    "RELEASE.ko.md",
+    "skills/batang/references/import.md",
+    "tests/test_import_ops.py",
+    "tests/test_temp_cleanup.py",
 }
 RELEASE_WORKFLOW = MADI / "references" / "workflow-contract.md"
 
@@ -108,6 +117,10 @@ def _relative_markdown_links(path: Path) -> list[Path]:
 
 
 class PackageContractTests(unittest.TestCase):
+    def test_operations_public_files_are_present_in_checksum_allowlist(self) -> None:
+        self.assertTrue(OPERATIONS_PUBLIC_FILES <= _relative_files(PACKAGE))
+        self.assertTrue(OPERATIONS_PUBLIC_FILES <= _manifest_files())
+
     def test_madi_public_allowlist_is_exact(self) -> None:
         self.assertEqual(_relative_files(MADI), MADI_PUBLIC_FILES)
 
@@ -199,8 +212,36 @@ class PackageContractTests(unittest.TestCase):
     def test_review_contract_is_preserved(self) -> None:
         contract = RELEASE_WORKFLOW.read_text(encoding="utf-8")
         for fragment in (
-            "quality_checker", "gpt-6.1-sol/high", "보안 검토",
+            "품질 일반 모드", "gpt-6.1-sol/high", "보안 검토",
             "Daybreak", "고정 최종 후보", "실패 이력",
+        ):
+            self.assertIn(fragment, contract)
+
+    def test_public_model_recommendations_preserve_project_policy_and_actual_calls(self) -> None:
+        example = (PACKAGE / "examples/AGENTS.md").read_text(encoding="utf-8")
+        for fragment in (
+            "public recommendation", "project-mandated models and modes take precedence",
+            "available permitted alternative", "assignment and reason in the plan",
+            "actual invocation in the run", "same entire fixed candidate",
+            "Preserve failed access attempts", "This file grants no runtime permissions",
+        ):
+            self.assertIn(fragment, example)
+        contract = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        for fragment in (
+            "공개 권장값", "프로젝트가 필수 모델·모드를 지정했다면 그 기준을 유지",
+            "실제 가용성", "허용 대체", "필수 기준을 임의로 낮추지",
+            "plan은 실제 배정과 대체 이유", "run은 실제 provider",
+            "모델 접근 오류와 미실행·차단은 보존",
+        ):
+            self.assertIn(fragment, contract)
+
+    def test_import_contract_keeps_source_and_registration_boundary(self) -> None:
+        contract = (BATANG / "references/import.md").read_text(encoding="utf-8")
+        for fragment in (
+            "원본은 읽기 전용", "독립 bytes", "기존 파일을 덮어쓰지",
+            "기존 등록 문서", "선택 밖 자료를 읽지", "범용 YAML 지원이 아니다",
+            "prepare_import(", "verify_import_source(", "정규 v1·v2",
+            "기존 ID·schema·sources를 보존", "호스트 등록 기록",
         ):
             self.assertIn(fragment, contract)
 

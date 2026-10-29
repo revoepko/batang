@@ -32,6 +32,80 @@ def metadata():
 
 
 class Documents(unittest.TestCase):
+    def test_aliases_v1_v2_preserve_omission_empty_spelling_order_and_duplicates(self):
+        for version in (1, 2):
+            for aliases in (ops._MISSING, [], ["별칭", "English", " 별칭 ", "별칭", "e\u0301", "é"]):
+                with self.subTest(version=version, aliases=aliases):
+                    value = metadata()
+                    value["batang_schema_version"] = version
+                    if aliases is not ops._MISSING:
+                        value["aliases"] = aliases
+                    before = copy.deepcopy(value)
+                    body = "\r\n본문 😀\r\ne\u0301".encode()
+                    encoded = ops.serialize_document(value, body)
+                    decoded, actual_body = ops.parse_document(encoded)
+                    self.assertEqual(decoded, before)
+                    self.assertEqual(value, before)
+                    self.assertEqual(actual_body, body)
+                    self.assertEqual(b"aliases: " in encoded, aliases is not ops._MISSING)
+                    if aliases is not ops._MISSING:
+                        self.assertIn(("aliases: " + json.dumps(aliases, ensure_ascii=False,
+                                                               separators=(",", ":"))).encode(), encoded)
+
+    def test_aliases_invalid_values_rejected_by_parser_validator_serializer_and_constructor(self):
+        invalid_values = (None, "별칭", 1, False, {}, ["정상", 1], [None], [""], [" \t\r\n"])
+        for version in (1, 2):
+            baseline = metadata()
+            baseline["batang_schema_version"] = version
+            valid = ops.serialize_document(baseline, b"body")
+            for invalid in invalid_values:
+                with self.subTest(version=version, invalid=invalid):
+                    value = dict(baseline, aliases=invalid)
+                    with self.assertRaisesRegex(ops.FileError, "metadata_aliases"):
+                        ops.validate_metadata(value)
+                    with self.assertRaisesRegex(ops.FileError, "metadata_aliases"):
+                        ops.serialize_document(value, b"body")
+                    malformed = valid.replace(b"---\n", b"---\naliases: " +
+                        json.dumps(invalid).encode() + b"\n", 1)
+                    with self.assertRaisesRegex(ops.FileError, "metadata_aliases"):
+                        ops.parse_document(malformed)
+                    with self.assertRaisesRegex(ops.FileError, "metadata_aliases"):
+                        ops.new_metadata("주제", "note", baseline["sources"], aliases=invalid)
+
+    def test_new_metadata_aliases_omitted_empty_and_copied_without_normalization(self):
+        sources = metadata()["sources"]
+        self.assertNotIn("aliases", ops.new_metadata("주제", "note", sources))
+        self.assertEqual(ops.new_metadata("주제", "note", sources, aliases=[])["aliases"], [])
+        aliases = ["별칭", " English ", "별칭"]
+        created = ops.new_metadata("주제", "note", sources, aliases=aliases)
+        self.assertEqual(created["aliases"], aliases)
+        created["aliases"].append("변경")
+        self.assertEqual(aliases, ["별칭", " English ", "별칭"])
+
+    def test_aliases_noop_bytes_and_edits_preserve_id_schema_body_and_other_fields(self):
+        for version in (1, 2):
+            for aliases in (ops._MISSING, [], ["별칭", "별칭"]):
+                with self.subTest(version=version, aliases=aliases):
+                    value = metadata()
+                    value["batang_schema_version"] = version
+                    if aliases is not ops._MISSING:
+                        value["aliases"] = aliases
+                    original = ops.serialize_document(value, b"\r\nbody\r\n")
+                    header, body = ops.split_frontmatter(original)
+                    crlf = b"---\r\n" + header.replace(b"\n", b"\r\n") + b"---\r\n" + body
+                    parsed, parsed_body = ops.parse_document(crlf)
+                    self.assertEqual(ops.serialize_document(parsed, parsed_body, original=crlf), crlf)
+                    parsed["aliases"] = ["다른 별칭", " English ", "다른 별칭"]
+                    encoded = ops.serialize_document(parsed, parsed_body, original=crlf)
+                    actual, actual_body = ops.parse_document(encoded)
+                    self.assertEqual(actual, parsed)
+                    self.assertEqual(actual_body, body)
+                    self.assertEqual({key: actual[key] for key in ops.KEYS},
+                                     {key: value[key] for key in ops.KEYS})
+                    duplicate = encoded.replace(b"aliases: ", b"aliases: []\naliases: ")
+                    with self.assertRaisesRegex(ops.FileError, "frontmatter_key"):
+                        ops.parse_document(duplicate)
+
     def test_named_synthetic_fixtures_roundtrip_without_byte_change(self):
         for name, version in (("schema-v1.md", 1), ("schema-v2-null.md", 2)):
             original = (Path(__file__).parent / "fixtures" / name).read_bytes()
@@ -267,7 +341,7 @@ class Files(unittest.TestCase):
         with patch.object(ops, "_rename_new_at", side_effect=race), self.assertRaises(FileExistsError):
             self.scope.write("Knowledge/new.md", b"ours")
         self.assertEqual((self.root / "Knowledge/new.md").read_bytes(), b"external")
-        temporary, = self.stage.glob(".batang-*.tmp")
+        temporary, = self.stage.rglob(".batang-*.tmp")
         self.assertEqual(temporary.read_bytes(), b"ours")
         self.assertEqual(stat.S_IMODE(self.stage.stat().st_mode), 0o700)
 
@@ -316,12 +390,12 @@ class Files(unittest.TestCase):
                 self.scope.write("Knowledge/a.md", b"new", ops.sha256(self.original),
                                  backup_scope=self.backups, backup_path="a.before")
         self.assertEqual(self.target.read_bytes(), self.original)
-        temporary, = self.stage.glob(".batang-*.tmp")
+        temporary, = self.stage.rglob(".batang-*.tmp")
         self.assertEqual(temporary.read_bytes(), b"new")
         self.assertEqual(stat.S_IMODE(self.stage.stat().st_mode), 0o700)
 
     def assert_scrubbed_temps(self, directory):
-        for temporary in (self.root / directory).glob(".batang-*.tmp"):
+        for temporary in (self.root / directory).rglob(".batang-*.tmp"):
             self.assertEqual(temporary.read_bytes(), b"")
             self.assertEqual(stat.S_IMODE(temporary.stat().st_mode), 0o600)
 
@@ -543,7 +617,7 @@ class MacOSACL(unittest.TestCase):
         with self.assertRaisesRegex(ops.FileError, "private_staging_unavailable"):
             self.scope.write("Knowledge/new.md", self.updated)
         self.assertFalse((self.root / "Knowledge/new.md").exists())
-        self.assertFalse(list(self.stage.glob(".batang-*.tmp")))
+        self.assertFalse(list(self.stage.rglob(".batang-*.tmp")))
 
     def test_allocated_acl_is_freed_on_serialization_and_set_errors(self):
         self.add_acl(self.target, "user:_www deny read")
@@ -572,8 +646,8 @@ class MacOSACL(unittest.TestCase):
         self.add_acl(self.target, "user:_www deny read")
         before, before_acl = self.target.stat(), self.read_acl(self.target)
         real_set = self.acl.lib.acl_set_fd_np
-        # 백업 ACL 제거, 본문 임시 ACL 제거, 원본 ACL 복원 각각의 실패를 확인한다.
-        for failure_call in (1, 2, 3):
+        # 백업 디렉터리·파일 ACL, 본문 디렉터리·파일 ACL 및 원본 ACL 복원 실패.
+        for failure_call in (1, 2, 3, 4, 5):
             with self.subTest(failure_call=failure_call):
                 calls = []
 
@@ -591,7 +665,7 @@ class MacOSACL(unittest.TestCase):
                     self.assertEqual(error.exception.errno, errno.EPERM)
                 self.assert_original(before, before_acl)
                 backup = self.root / "backups/a.before"
-                if failure_call > 1:
+                if failure_call > 2:
                     self.assertEqual(backup.read_bytes(), self.original)
                     self.assertEqual(self.read_acl(backup), self.acl.empty)
                     backup.unlink()
@@ -737,7 +811,7 @@ class MacOSACL(unittest.TestCase):
 
         def race(fd):
             if os.fstat(fd).st_size == len(self.updated):
-                temporary, = self.stage.glob(".batang-*.tmp")
+                temporary, = self.stage.rglob(".batang-*.tmp")
                 temporary.rename(self.root / "detached-owned-temp")
                 temporary.write_bytes(b"other-writer")
                 foreign.append(temporary)
@@ -755,7 +829,7 @@ class MacOSACL(unittest.TestCase):
         foreign = []
 
         def race(source, destination, **kwargs):
-            temporary, = self.stage.glob(".batang-*.tmp")
+            temporary, = self.stage.rglob(".batang-*.tmp")
             detached = self.root / "detached-owned-temp"
             temporary.rename(detached)
             temporary.write_bytes(b"other-writer")
@@ -783,7 +857,7 @@ class MacOSACL(unittest.TestCase):
             with self.assertRaises(KeyboardInterrupt):
                 self.scope.write("Knowledge/new.md", self.updated)
         self.assertEqual((self.root / "Knowledge/new.md").read_bytes(), self.updated)
-        self.assertFalse(list(self.stage.glob(".batang-*.tmp")))
+        self.assertFalse(list(self.stage.rglob(".batang-*.tmp")))
 
     def test_interrupt_after_existing_publication_keeps_published_bytes_and_acl(self):
         self.add_acl(self.target, "user:_www deny read")
@@ -800,15 +874,30 @@ class MacOSACL(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), self.updated)
         self.assertEqual(self.read_acl(self.target), before_acl)
         self.assertEqual((self.root / "backups/a.before").read_bytes(), self.original)
-        self.assertFalse(list(self.stage.glob(".batang-*.tmp")))
+        self.assertFalse(list(self.stage.rglob(".batang-*.tmp")))
 
     def test_exclusive_temp_collision_never_deletes_other_file(self):
         temporary = self.stage / ".batang-collision.tmp"
         temporary.write_bytes(b"other-writer")
         fake_uuid = unittest.mock.Mock(hex="collision")
-        with patch.object(ops.uuid, "uuid4", return_value=fake_uuid), self.assertRaises(FileExistsError):
-            self.scope.write("Knowledge/new.md", self.updated)
+        real_open = ops.os.open
+        created = []
+
+        def collide(path, flags, *args, **kwargs):
+            if path == ".batang-collision.tmp" and flags & os.O_CREAT:
+                foreign_fd = real_open(path, flags, *args, **kwargs)
+                os.write(foreign_fd, b"other-writer")
+                os.close(foreign_fd)
+                created.append(path)
+            return real_open(path, flags, *args, **kwargs)
+
+        with patch.object(ops.uuid, "uuid4", return_value=fake_uuid):
+            with patch.object(ops.os, "open", side_effect=collide), self.assertRaises(FileExistsError):
+                self.scope.write("Knowledge/new.md", self.updated)
+        self.assertEqual(created, [".batang-collision.tmp"])
         self.assertEqual(temporary.read_bytes(), b"other-writer")
+        self.assertEqual((self.stage / ".batang-op-collision/.batang-collision.tmp").read_bytes(),
+                         b"other-writer")
         self.assertFalse((self.root / "Knowledge/new.md").exists())
 
 

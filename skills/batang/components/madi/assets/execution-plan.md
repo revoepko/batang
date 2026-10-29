@@ -1,5 +1,7 @@
 # 상세 실행 계획
 
+여기서 v1은 `verification_policy_version=1`을 뜻하며 지식 문서의 메타데이터 형식 버전이나 제품 버전과는 별개다.
+
 acceptance는 관찰 가능한 완료 기준이다. 계획의 예상 명령과 결과를 실제 실행 결과로 기록하지 않는다.
 
 - plan_id / run_id / 작성자:
@@ -12,7 +14,7 @@ acceptance는 관찰 가능한 완료 기준이다. 계획의 예상 명령과 �
 - profile·bundle identity·단일 skill과 내부 마디 절차의 고정 checkout 경로:
 - 공개 package를 만드는 작업이면 개발 원본·허용 목록·staging 경로 / 제외할 로컬 기록 / 고정 manifest·checksum hash:
 - checker 권장 규약 선택 기록 / 대상 프로젝트 정책 경로·hash / 기존 전역·프로젝트 규약과의 충돌·drift 확인:
-- 품질 검토는 일반 모드 `gpt-6.1-sol/high`인지 확인 / 보안 검토는 Daybreak 접근·호환·모드 확인 시 `gpt-6-sol/high`, 접근 불가 시 일반 `gpt-6.1-sol/high` 선택 / 어느 경로든 고정 최종 후보 전체 독립 검토:
+- 프로젝트 필수 모델·모드 / 공개 권장값 / 허용 대체 / 실제 역할·모델·추론 수준·모드 배정과 대체 이유 / 고정 후보 전체의 독립 검토:
 
 | 요구 ID | 요구·관찰 가능한 acceptance | 검증 ID·방법·환경·예상 결과 |
 |---|---|---|

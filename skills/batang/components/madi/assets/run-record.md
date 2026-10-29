@@ -1,5 +1,7 @@
 # 실행 기록
 
+여기서 v1은 `verification_policy_version=1`을 뜻하며 지식 문서의 메타데이터 형식 버전이나 제품 버전과는 별개다.
+
 run은 한 번의 작업 실행 기록이다. 설치 link, 세션에서 실제 읽은 경로, run이 고정한 snapshot을 각각 기록하고 혼동하지 않는다.
 
 - run_id / previous_run / 시작·종료 시각:
@@ -12,7 +14,7 @@ run은 한 번의 작업 실행 기록이다. 설치 link, 세션에서 실제 �
 - 요청·권한 근거 / 결정 기록 / 계획 위치:
 - vault·활성 목록·Graphify·Archify의 실제 접근 범위와 관찰:
 - 실제 역할·provider·model·invocation:
-- 품질 검토의 실제 일반 모드 `gpt-6.1-sol/high` / 보안 검토의 Daybreak `gpt-6-sol/high` 또는 일반 `gpt-6.1-sol/high` 선택, 접근·호환·모드 판단과 실패·후속 경로 이력:
+- 검토별 실제 호출·모델·추론 수준·모드 / 프로젝트 필수 기준 충족 / 접근·호환 판단과 실패·후속 경로 이력:
 - verification_policy_version / legacy 여부:
 - 기존 API 필수 run 또는 다른 snapshot과의 관계 / 자동 전환 여부: 없음 / 별도 승인:
 - 설치 시 checker 권장 규약 선택 / 대상 프로젝트 정책의 실제 경로·SHA-256 / 현재 내용과의 drift·충돌 / 재확인 결과:

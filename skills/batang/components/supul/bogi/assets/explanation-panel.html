@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="구조·절차·분기·비교를 서로 다른 사례로 설명하는 재사용 예제입니다.">
+  <title>차근차근 보기 — 네 가지 설명 예제</title>
+  <style>
+    :root { color-scheme: light; --paper: #f5f6ef; --surface: #fffef9; --ink: #243b31; --muted: #53675c; --line: #d3ddcf; --accent: #285d47; --soft: #e9f0e2; --focus: #80551e; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.8 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
+    a { color: var(--accent); text-underline-offset: 4px; }
+    a:focus-visible, button:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }
+    .skip { position: absolute; top: -100px; left: 16px; padding: 10px 16px; background: var(--ink); color: white; z-index: 2; }
+    .skip:focus { top: 10px; }
+    .wrap { width: min(1060px, calc(100% - 48px)); margin: auto; }
+    header { padding: 48px 0 28px; }
+    .eyebrow { font-size: 12px; letter-spacing: .13em; color: var(--accent); font-weight: 700; }
+    h1 { font-size: clamp(29px, 4.4vw, 46px); line-height: 1.4; letter-spacing: -.045em; font-weight: 600; margin: 12px 0 17px; }
+    header p { max-width: 720px; color: var(--muted); font-size: 15px; margin: 0; }
+    .notice { font-size: 12px; padding: 13px 17px; margin-top: 22px; border-left: 3px solid var(--accent); background: var(--soft); }
+    .example-picker { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+    .example-picker button { flex: 1 1 180px; min-height: 48px; font: inherit; font-size: 14px; text-align: left; background: var(--surface); border: 1px solid var(--line); color: var(--ink); padding: 10px 16px; border-radius: 5px; cursor: pointer; }
+    .example-picker button:hover { border-color: var(--accent); }
+    .example-picker button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: white; }
+    main { padding-bottom: 36px; }
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 32px; min-width: 0; }
+    article + article { margin-top: 32px; padding-top: 32px; border-top: 1px solid var(--line); }
+    .enhanced article { margin: 0; padding: 0; border: 0; }
+    .article-head { display: flex; gap: 22px; align-items: baseline; margin-bottom: 20px; }
+    .kind { color: var(--accent); font-size: 12px; min-width: 56px; }
+    h2 { font-size: 25px; line-height: 1.5; letter-spacing: -.035em; margin: 0; }
+    .overview { margin: 0 0 24px; max-width: 840px; }
+    h3 { font-size: 15px; margin: 0 0 9px; }
+    .facts { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 23px; }
+    .facts > section { min-width: 0; }
+    .facts p, .facts ul, .facts ol { font-size: 14px; color: var(--muted); margin: 0; }
+    .facts ul, .facts ol { padding-left: 20px; }
+    .facts li + li { margin-top: 7px; }
+    .relation { border-left: 2px solid #9fb396; padding-left: 15px; }
+    .supplement { color: var(--muted); font-size: 14px; margin: 22px 0 0; }
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .compare > section { min-width: 0; border: 1px solid var(--line); padding: 17px; border-radius: 4px; }
+    .compare p { margin: 0; font-size: 14px; color: var(--muted); }
+    .compare p + p { margin-top: 9px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+    @media (max-width: 680px) {
+      .wrap { width: calc(100% - 32px); }
+      header { padding-top: 30px; }
+      header p { font-size: 14px; }
+      .example-picker { gap: 8px; }
+      .example-picker button { flex: 1 1 calc(50% - 8px); padding: 10px; font-size: 13px; }
+      .panel { padding: 22px 18px; }
+      .article-head { gap: 8px; flex-direction: column; margin-bottom: 16px; }
+      h2 { font-size: 22px; }
+      .overview { font-size: 14px; margin-bottom: 20px; }
+      .facts { grid-template-columns: 1fr; gap: 20px; }
+      .compare { grid-template-columns: 1fr; gap: 10px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#examples">본문으로 바로가기</a>
+  <header class="wrap">
+    <span class="eyebrow">차근차근 보기</span>
+    <h1>이해하고 싶은 것에 맞춰,<br>설명의 모양을 고릅니다.</h1>
+    <p>구조는 연결을, 절차는 순서를, 분기는 조건을, 비교는 선택 기준을 보여 줍니다.</p>
+    <div class="notice">네 사례는 설명을 위해 만든 가상 예제입니다. 실제 기관의 규칙·운영 현황·검증 결과를 뜻하지 않습니다.</div>
+  </header>
+
+  <!-- 재사용: 독자의 목적에 맞게 사례의 제목·본문·조건·예외·비교를 함께 바꾼다.
+       버튼의 data-select-example과 article의 data-example을 같은 고유값으로 연결한다.
+       aria-controls·id·aria-labelledby도 함께 맞춘다. 사례 수나 주제는 script에 고정하지 않는다.
+       짧은 보충은 본문에 통합하고, 실제 참고자료는 관련 설명 옆에 제목·위치·시점·확인 범위를 적는다.
+       실제 자료로 교체할 때는 위 가상 공지를 그 자료에 맞게 고친다.
+       HTML 원문에는 모든 핵심 내용을 남긴다. 선택 UI는 준비된 뒤에만 표시한다. -->
+  <main class="wrap" id="examples">
+    <nav class="example-picker" aria-label="예제 선택" hidden>
+      <button type="button" data-select-example="structure" aria-controls="example-structure" aria-pressed="false">구조 · 동네 도서관</button>
+      <button type="button" data-select-example="process" aria-controls="example-process" aria-pressed="false">절차 · 수리 접수</button>
+      <button type="button" data-select-example="branch" aria-controls="example-branch" aria-pressed="false">분기 · 산책 경로</button>
+      <button type="button" data-select-example="comparison" aria-controls="example-comparison" aria-pressed="false">비교 · 학습 방식</button>
+    </nav>
+    <div class="panel" id="explanation-panel">
+      <article id="example-structure" data-example="structure" aria-labelledby="title-structure">
+        <div class="article-head"><span class="kind">01 / 구조</span><h2 id="title-structure">도서관은 사람과 자료를 연결합니다.</h2></div>
+        <p class="overview">동네 도서관에서 이용자는 필요한 활동을 제안하고, 운영 모임은 공간과 자료를 조정합니다. 자원활동가는 정해진 운영 범위에서 이를 돕습니다.</p>
+        <div class="facts">
+          <section class="relation"><h3>핵심 관계</h3><ul><li>이용자 → 운영 모임: 활동 제안</li><li>운영 모임 → 공간·자료: 일정과 이용 기준 조정</li><li>자원활동가 → 이용자: 안내와 정리 지원</li></ul></section>
+          <section><h3>조건</h3><p>운영 모임은 공간과 자료를 확인한 뒤 활동을 확정합니다. 제안 접수만으로 이용 일정이 확보되지는 않습니다.</p></section>
+          <section><h3>예외</h3><p>공간이 이미 예약되었다면 대체 일정을 협의합니다. 자원활동가는 대출 기준을 임의로 바꾸거나 운영 모임의 결정 권한을 대신할 수 없습니다.</p></section>
+        </div>
+        <p class="supplement">이 구조는 구성과 책임을 설명합니다. 모든 활동이 차례로 거치는 고정 업무 절차는 아닙니다.</p>
+      </article>
+
+      <article id="example-process" data-example="process" aria-labelledby="title-process">
+        <div class="article-head"><span class="kind">02 / 절차</span><h2 id="title-process">수리 접수와 일정 확정은 다른 단계입니다.</h2></div>
+        <p class="overview">수리 공방은 접수 내용을 검토하고 부품과 작업 시간을 확인한 뒤 고객과 일정을 확정합니다. 완료 안내는 실제 수리와 점검이 끝난 뒤 보냅니다.</p>
+        <div class="facts">
+          <section class="relation"><h3>진행 순서와 완료 조건</h3><ol><li>접수: 증상과 연락 방법 확인</li><li>검토: 작업 가능 여부와 필요한 부품·시간 확인</li><li>일정 확정: 고객과 작업 날짜 합의</li><li>완료: 실제 수리·점검 결과 확인 후 안내</li></ol></section>
+          <section><h3>선행 조건</h3><p>필요한 부품과 시간이 확인되고 고객이 일정에 동의해야 수리를 시작합니다. 접수 번호는 완료나 예약 확정의 증거가 아닙니다.</p></section>
+          <section><h3>예외</h3><p>부품이 없으면 대기 상태와 다음 확인 시점을 안내합니다. 수리가 불가능하면 이유를 설명하고 일정 확정 단계로 넘어가지 않습니다.</p></section>
+        </div>
+        <p class="supplement">대기나 불가 상태는 완료로 표시하지 않습니다. 일정을 바꿔야 하면 바뀐 조건을 알리고 고객과 다시 합의합니다.</p>
+      </article>
+
+      <article id="example-branch" data-example="branch" aria-labelledby="title-branch">
+        <div class="article-head"><span class="kind">03 / 분기</span><h2 id="title-branch">경로는 조건에 따라 하나를 고릅니다.</h2></div>
+        <p class="overview">공원 전체가 열려 있는지 먼저 확인합니다. 비가 오지 않으면 중앙길을, 비가 오면 지붕이 있는 회랑을 선택하되, 해당 경로가 닫혀 있으면 산책을 미룹니다.</p>
+        <div class="facts">
+          <section class="relation"><h3>조건별 결과</h3><ul><li>공원 전체 폐쇄 → 산책 미루기</li><li>비 없음 + 중앙길 개방 → 중앙길</li><li>비 있음 + 회랑 개방 → 회랑</li><li>선택할 경로 폐쇄 → 산책 미루기</li></ul></section>
+          <section><h3>판단 순서</h3><p>전체 개방 여부를 먼저 확인하고 날씨에 맞는 경로의 개방 여부를 확인합니다. 전체 폐쇄 조건을 가장 먼저 적용합니다.</p></section>
+          <section><h3>예외·미확인</h3><p>날씨나 개방 상태를 확인하지 못했다면 경로를 확정하지 않습니다. 선택한 경로가 닫혀 있으면 다른 경로로 자동 변경하지 않습니다.</p></section>
+        </div>
+        <p class="supplement">중앙길과 회랑은 조건별 대안이며 두 경로를 연속 이동하는 단계가 아닙니다. 실제 방문 전에는 해당 공원의 현재 안내를 확인해야 합니다.</p>
+      </article>
+
+      <article id="example-comparison" data-example="comparison" aria-labelledby="title-comparison">
+        <div class="article-head"><span class="kind">04 / 비교</span><h2 id="title-comparison">학습 시간뿐 아니라 지속할 조건을 비교합니다.</h2></div>
+        <p class="overview">학습 모임은 한 주의 복습을 목표로 두 계획을 비교합니다. 짧게 자주 할지 길게 묶어 할지는 확보할 수 있는 시간과 과제 성격에 따라 달라집니다.</p>
+        <div class="compare">
+          <section><h3>계획 A · 짧게 나누기</h3><p><data value="25">25분</data> × 주 <data value="5">5회</data> = <data value="125">125분</data></p><p>매일 짧은 시간을 낼 수 있을 때 선택합니다. 시작과 정리를 여러 번 해야 합니다.</p></section>
+          <section><h3>계획 B · 길게 묶기</h3><p><data value="60">60분</data> × 주 <data value="2">2회</data> = <data value="120">120분</data></p><p>긴 시간을 따로 확보할 수 있을 때 선택합니다. 한 번을 빠지면 그 주 계획의 절반이 비게 됩니다.</p></section>
+        </div>
+        <div class="facts">
+          <section class="relation"><h3>공통 기준</h3><p>주당 시간·참여 빈도·확보 가능한 연속 시간·빠졌을 때의 영향을 같은 기준으로 비교합니다.</p></section>
+          <section><h3>선택 조건</h3><p>짧은 틈은 자주 있지만 긴 시간이 어렵다면 A를, 긴 시간을 주 2회 확보할 수 있다면 B를 검토합니다. 총시간은 5분 차이이며, 횟수와 연속 시간도 다릅니다.</p></section>
+          <section><h3>예외·한계</h3><p>60분 이상 이어 해야 하는 과제에는 둘 다 맞지 않을 수 있습니다. 총시간만 비슷하다고 같은 경험으로 보거나 우수한 계획을 고를 수는 없습니다.</p></section>
+        </div>
+        <p class="supplement">선택 전에는 참여자의 일정과 과제 조건을 확인해야 합니다. 이해도·성적·완주율을 관측한 자료가 없으므로 학습 효과의 차이는 미확인입니다.</p>
+      </article>
+    </div>
+    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true" id="selection-status"></p>
+  </main>
+  <script>
+    (() => {
+      const picker = document.querySelector('.example-picker');
+      const panel = document.getElementById('explanation-panel');
+      const status = document.getElementById('selection-status');
+      const buttons = Array.from(picker.querySelectorAll('button[data-select-example]'));
+      const articles = Array.from(panel.querySelectorAll('article[data-example]'));
+      // 연결이 불완전하면 전체 본문을 보존하고 선택 UI를 활성화하지 않는다.
+      if (!buttons.length || buttons.length !== articles.length ||
+          new Set(buttons.map(button => button.dataset.selectExample)).size !== buttons.length ||
+          !buttons.every(button => articles.some(article =>
+            article.dataset.example === button.dataset.selectExample &&
+            article.id === button.getAttribute('aria-controls')))) return;
+
+      let selected;
+      function select(button, announce = true) {
+        if (selected === button) return;
+        const target = button.getAttribute('aria-controls');
+        articles.forEach(article => { article.hidden = article.id !== target; });
+        buttons.forEach(item => { item.setAttribute('aria-pressed', String(item === button)); });
+        selected = button;
+        if (announce) {
+          status.textContent = document.getElementById(target).querySelector('h2').textContent;
+        }
+      }
+      buttons.forEach(button => { button.addEventListener('click', () => select(button)); });
+      select(buttons[0], false);
+      panel.classList.add('enhanced');
+      picker.hidden = false;
+    })();
+  </script>
+</body>
+</html>

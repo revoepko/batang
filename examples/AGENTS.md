@@ -24,8 +24,11 @@ The project owner selects and prepares `backup_root` in an approved location; th
 
 The link is relative to `knowledge_root`. Use only listed files and material the user selects for the request. Selecting a vault does not grant access to every note.
 
+For role recommendations, allowed alternatives, reasoning levels, and selection criteria, merge with existing project policy only at installation, first use, or a relevant environment or policy change. Preserve mandatory project models and modes. The parent chooses an available permitted alternative; record the assignment and reason in the plan and actual invocation in the run. This file grants no runtime permissions.
+
 ## Existing vault and tools
 
+- For selected existing notes, follow [the import contract](../skills/batang/references/import.md); copy independent bytes and leave originals unchanged.
 - Preserve the existing vault's folders, notes, frontmatter, `.obsidian` settings, and active list. Do not import the whole vault.
 - If the active list is missing or conflicts with the request, propose its exact path and included files. Create or replace it only after explicit approval.
 - If the user has no vault, ask for its name, parent directory, and whether to create it. Create only the agreed empty structure after explicit approval.
@@ -45,8 +48,8 @@ This example is not itself installed. First compare it with the target project's
 
 - Follow the host's existing subagent rules and permissions. These project instructions do not change global settings, model availability, or Daybreak access.
 - `quality_checker` and `security_checker` name review responsibilities, not required Codex agent profile names. An available `default`, `worker`, `explorer`, or other host role can perform a required review only when the actual call is independent and meets the required model and mode. Custom TOML profiles are optional.
-- For Madi development work, the required quality review uses standard mode `gpt-6.1-sol/high`; if it cannot be run and verified, record the gate as blocked.
-- For a required security review, use Daybreak `gpt-6-sol/high` only when access, model compatibility, and actual mode are verified. Otherwise use standard `gpt-6.1-sol/high` for the same entire fixed candidate when the host can make that call. Preserve failed access attempts and review findings.
+- For Madi development work, quality review is required. The public recommendation is standard mode `gpt-6.1-sol/high`; project-mandated models and modes take precedence. The parent selects an available alternative only when permitted. If the required review cannot be verified, record the gate as blocked.
+- For a required security review, the public recommendation is Daybreak `gpt-6-sol/high` only when access, model compatibility, and actual mode are verified. Otherwise the recommendation is standard `gpt-6.1-sol/high` for the same entire fixed candidate when the host can make that call; preserve mandatory project requirements and use only permitted alternatives. Preserve failed access attempts and review findings.
 - Every task using the internal Madi workflow requires review independent of its author. Public code release also requires the independent security review of the entire fixed candidate. For ordinary documentation and diagram work, the project plan determines whether additional quality or security review is needed and records the reason; it does not waive the independent review.
 - In a new run using Madi, verify the actual policy paths, candidate manifest, and reviewer invocation. A profile name or settings file alone does not prove that a review ran.
 ```

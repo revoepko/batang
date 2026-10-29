@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import copy
 import ctypes
 import errno
+import fcntl
 import hashlib
 import json
 import os
@@ -24,6 +25,7 @@ class ConflictError(FileError):
 
 KEYS = ("batang_schema_version", "batang_id", "subject", "tags", "content_kind",
         "sources", "legacy_refs")
+OPTIONAL_KEYS = ("aliases",)
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _MISSING = object()
 
@@ -33,7 +35,8 @@ def sha256(data):
 
 
 def validate_metadata(metadata):
-    if not isinstance(metadata, dict) or set(metadata) != set(KEYS):
+    if (not isinstance(metadata, dict) or not set(KEYS).issubset(metadata)
+            or not set(metadata).issubset(KEYS + OPTIONAL_KEYS)):
         raise FileError("metadata_keys")
     version = metadata["batang_schema_version"]
     if type(version) is not int or version not in (1, 2):
@@ -43,6 +46,11 @@ def validate_metadata(metadata):
             raise FileError("metadata_string")
     if not isinstance(metadata["tags"], list) or any(not isinstance(t, str) for t in metadata["tags"]):
         raise FileError("metadata_tags")
+    if "aliases" in metadata:
+        aliases = metadata["aliases"]
+        if (not isinstance(aliases, list)
+                or any(not isinstance(alias, str) or not alias.strip() for alias in aliases)):
+            raise FileError("metadata_aliases")
     for key, fields in (("sources", {"id", "path", "origin", "sha256", "raw_path"}),
                         ("legacy_refs", {"path", "sha256"})):
         if not isinstance(metadata[key], list):
@@ -59,12 +67,15 @@ def validate_metadata(metadata):
                     raise FileError("metadata_ref")
 
 
-def new_metadata(subject, content_kind, sources, *, tags=_MISSING, legacy_refs=_MISSING):
+def new_metadata(subject, content_kind, sources, *, tags=_MISSING, legacy_refs=_MISSING,
+                 aliases=_MISSING):
     """호스트의 신규 v2 입력만 생성한다. 저장·기존 문서 변환·권한 판단은 하지 않는다."""
     metadata = {"batang_schema_version": 2, "batang_id": str(uuid.uuid4()),
                 "subject": subject, "tags": [] if tags is _MISSING else copy.deepcopy(tags),
                 "content_kind": content_kind, "sources": copy.deepcopy(sources),
                 "legacy_refs": [] if legacy_refs is _MISSING else copy.deepcopy(legacy_refs)}
+    if aliases is not _MISSING:
+        metadata["aliases"] = copy.deepcopy(aliases)
     validate_metadata(metadata)
     return metadata
 
@@ -94,7 +105,8 @@ def serialize_document(metadata, body, *, original=None):
             return original
     header = "---\n" + "".join(
         key + ": " + json.dumps(metadata[key], ensure_ascii=False, allow_nan=False,
-                                 separators=(",", ":")) + "\n" for key in KEYS) + "---\n"
+                                 separators=(",", ":")) + "\n"
+        for key in KEYS + OPTIONAL_KEYS if key in metadata) + "---\n"
     return header.encode("utf-8") + body
 
 
@@ -105,7 +117,7 @@ def parse_document(data):
         # JSON 문자열 안의 U+0085/U+2028/U+2029는 metadata 값이며 줄 경계가 아니다.
         for line in header.decode("utf-8").removesuffix("\n").split("\n"):
             key, value = line.split(": ", 1)
-            if key not in KEYS or key in metadata:
+            if key not in KEYS + OPTIONAL_KEYS or key in metadata:
                 raise FileError("frontmatter_key")
             metadata[key] = json.loads(value, object_pairs_hook=_unique_object)
     except (UnicodeError, ValueError) as exc:
@@ -145,6 +157,278 @@ class Snapshot:
     data: bytes
     sha256: str
     mode: int
+
+
+@dataclass(frozen=True)
+class ImportResult:
+    """활성 등록 요청이 아닌, 호스트가 재검사할 복제 결과와 관측 출처."""
+    status: str
+    target_root: str
+    target_path: str
+    target_sha256: str
+    metadata: dict
+    provenance: dict
+    references: tuple
+    source_identity: tuple
+
+
+def _scope_root(scope):
+    return "/" + "/".join(scope.root_parts)
+
+
+def _source_snapshot(scope, path):
+    with scope._parent(path) as (parent, name):
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            before = os.fstat(fd)
+            result = _read_fd_at(parent, name, fd)
+            _check_at(parent, name, fd, before)
+            return result, _identity(before)
+        finally:
+            os.close(fd)
+
+
+def verify_import_source(source_scope, result):
+    """호스트는 활성 목록 반영 직전에 호출한다. 전체 등록 원자성은 제공하지 않는다."""
+    if _scope_root(source_scope) != result.provenance["source_root"]:
+        raise ConflictError("import_source_scope")
+    snapshot, identity = _source_snapshot(source_scope, result.provenance["source_path"])
+    if identity != result.source_identity or snapshot.sha256 != result.provenance["source_sha256"]:
+        raise ConflictError("import_source_changed")
+    return True
+
+
+def _yaml_string(raw):
+    """제한 입력만 받는다. 일반 YAML의 의미 추론이나 자동 타입 변환은 하지 않는다."""
+    raw = raw.strip()
+    if raw.startswith('"'):
+        try:
+            value = json.loads(raw)
+        except ValueError:
+            raise FileError("import_yaml_unsupported") from None
+        if not isinstance(value, str):
+            raise FileError("import_yaml_unsupported")
+        return value
+    if raw.startswith("'") and raw.endswith("'"):
+        value = raw[1:-1]
+        if "'" in value.replace("''", ""):
+            raise FileError("import_yaml_unsupported")
+        return value.replace("''", "'")
+    if (not raw or any(character in raw for character in ":#[]{}&,*!|>%@`\"'\t")
+            or raw.startswith(("-", "?"))
+            or raw.lower() in ("null", "~", "true", "false", "yes", "no", "on", "off")
+            or re.match(r"^[+-]?(?:[0-9]|\.[0-9])", raw)
+            or raw.lower() in (".nan", ".inf", "+.inf", "-.inf")):
+        raise FileError("import_yaml_unsupported")
+    return raw
+
+
+def _limited_yaml(header):
+    try:
+        lines = header.decode("utf-8").split("\n")
+    except UnicodeError:
+        raise FileError("import_yaml_unsupported") from None
+    result = {}
+    position = 0
+    while position < len(lines):
+        line = lines[position].removesuffix("\r")
+        position += 1
+        if not line:
+            continue
+        match = re.fullmatch(r"([a-z_]+):(?: (.*))?", line)
+        if not match:
+            raise FileError("import_yaml_unsupported")
+        key, raw = match.groups()
+        if key not in KEYS + OPTIONAL_KEYS or key in result:
+            raise FileError("import_yaml_unsupported")
+        if key in ("tags", "aliases"):
+            if raw is None or raw == "":
+                value = []
+                while position < len(lines):
+                    item = re.fullmatch(r"  - (.+)", lines[position].removesuffix("\r"))
+                    if not item:
+                        break
+                    value.append(_yaml_string(item.group(1)))
+                    position += 1
+                if not value:
+                    raise FileError("import_yaml_unsupported")
+            else:
+                try:
+                    value = json.loads(raw)
+                except ValueError:
+                    raise FileError("import_yaml_unsupported") from None
+                if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                    raise FileError("import_yaml_unsupported")
+        elif key in ("sources", "legacy_refs", "batang_schema_version"):
+            try:
+                value = json.loads(raw, object_pairs_hook=_unique_object)
+            except (ValueError, TypeError):
+                raise FileError("import_yaml_unsupported") from None
+        else:
+            value = _yaml_string(raw or "")
+        result[key] = value
+    return result
+
+
+def _import_metadata(data, source_path, source_hash, subject, content_kind):
+    if data.startswith((b"---\n", b"---\r\n")):
+        header, body = split_frontmatter(data)
+        try:
+            metadata, body = parse_document(data)
+        except FileError:
+            metadata = _limited_yaml(header)
+            if ("batang_schema_version" in metadata or "batang_id" in metadata) and not set(KEYS).issubset(metadata):
+                raise FileError("import_managed_metadata_incomplete")
+    else:
+        metadata, body = {}, data
+    # 기존 속성을 바꾸지 않고 없는 필수 키만 신규 문서 기본값으로 채운다.
+    metadata = copy.deepcopy(metadata)
+    metadata.setdefault("batang_schema_version", 2)
+    metadata.setdefault("batang_id", str(uuid.uuid4()))
+    metadata.setdefault("subject", subject if subject is not None else os.path.splitext(source_path[-1])[0])
+    metadata.setdefault("content_kind", content_kind)
+    metadata.setdefault("tags", [])
+    metadata.setdefault("legacy_refs", [])
+    metadata.setdefault("sources", [{"id": str(uuid.uuid4()), "path": "/" + "/".join(source_path),
+                                    "origin": "user", "sha256": source_hash, "raw_path": None}])
+    validate_metadata(metadata)
+    # strict 문서는 CRLF, 순서와 formatting까지 no-op으로 보존한다.
+    try:
+        original_metadata, original_body = parse_document(data)
+    except FileError:
+        return metadata, body, serialize_document(metadata, body)
+    return metadata, body, serialize_document(metadata, body, original=data)
+
+
+def _import_references(data, source_scope, source_path, selected_sources):
+    """선택된 경로의 존재만 확인한다. 첨부 수집·범위 밖 stat/read는 하지 않는다."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeError:
+        raise FileError("import_encoding") from None
+    matches = [(match.start(), match.group(1)) for match in re.finditer(r"!?\[\[([^]\n]+)\]\]", text)]
+    matches += [(match.start(), match.group(1)) for match in re.finditer(r"!?\[[^]\n]*\]\(([^)\n]+)\)", text)]
+    selected = {_parts(path) for path in selected_sources}
+    if not selected.issubset(source_scope.allowed):
+        raise FileError("import_reference_scope")
+    references = []
+    for _, raw in sorted(matches):
+        target = raw.split("|", 1)[0].split("#", 1)[0]
+        if not target:
+            continue
+        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target):
+            references.append({"reference": raw, "status": "unverified"})
+            continue
+        parts = list(_parts(source_path)[:-1])
+        unsafe = target.startswith("/") or "\\" in target or "\x00" in target
+        for part in target.split("/"):
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if not parts:
+                    unsafe = True
+                else:
+                    parts.pop()
+            else:
+                parts.append(part)
+        normalized = tuple(parts)
+        if normalized not in selected and target and not os.path.splitext(target)[1]:
+            candidate = tuple(parts[:-1] + [parts[-1] + ".md"]) if parts else ()
+            if candidate in selected:
+                normalized = candidate
+        status = "unverified"
+        if not unsafe and normalized in selected:
+            try:
+                source_scope.read("/".join(normalized))
+            except (OSError, FileError):
+                status = "broken"
+            else:
+                status = "selected"
+        references.append({"reference": raw, "status": status})
+    return tuple(references)
+
+
+def prepare_import(source_scope, source_path, target_scope, target_path, *, subject=None,
+                   content_kind="note", registered_documents=(), prior_imports=(),
+                   selected_sources=()):
+    """선택한 원본의 독립 복제만 만든다. ACTIVE 편집·동기화·실패 복제 삭제는 하지 않는다."""
+    source_parts = source_scope.root_parts + _parts(source_path)
+    target_parts = target_scope.root_parts + _parts(target_path)
+    if target_parts[:len(source_scope.root_parts)] == source_scope.root_parts:
+        raise FileError("import_source_overlap")
+    snapshot, identity = _source_snapshot(source_scope, source_path)
+    provenance = {"source_root": _scope_root(source_scope), "source_path": source_path,
+                  "source_sha256": snapshot.sha256, "source_file_identity": identity[:2]}
+    registered = []
+    registered_ids = set()
+    for scope, path in registered_documents:
+        saved = scope.read(path)
+        value, _ = parse_document(saved.data)
+        if value["batang_id"] in registered_ids:
+            raise ConflictError("import_registered_id_collision")
+        registered_ids.add(value["batang_id"])
+        registered.append((scope, path, saved, value))
+    source_key = (_scope_root(source_scope), source_path)
+    for prior in prior_imports:
+        if (prior.provenance["source_root"], prior.provenance["source_path"]) != source_key:
+            continue
+        if prior.provenance["source_file_identity"] != identity[:2]:
+            raise ConflictError("import_source_identity_conflict")
+        if prior.provenance["source_sha256"] != snapshot.sha256:
+            continue
+        for scope, path, saved, value in registered:
+            if (_scope_root(scope), path) == (prior.target_root, prior.target_path):
+                if value["batang_id"] != prior.metadata["batang_id"]:
+                    raise ConflictError("import_registered_identity")
+                result = ImportResult("skipped", prior.target_root, path, saved.sha256,
+                                      value, provenance, prior.references, identity)
+                verify_import_source(source_scope, result)
+                return result
+        raise ConflictError("import_registered_missing")
+    with target_scope._parent(target_path) as (parent, name):
+        try:
+            existing = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            if (existing.st_dev, existing.st_ino) == identity[:2]:
+                raise ConflictError("import_same_inode")
+            raise ConflictError("import_target_collision")
+    metadata, body, encoded = _import_metadata(snapshot.data, source_parts, snapshot.sha256,
+                                               subject, content_kind)
+    if any(value["batang_id"] == metadata["batang_id"] for _, _, _, value in registered):
+        raise ConflictError("import_metadata_id_collision")
+    references = _import_references(body, source_scope, source_path, selected_sources)
+    result = ImportResult("prepared", _scope_root(target_scope), target_path, sha256(encoded),
+                          metadata, provenance, references, identity)
+    verify_import_source(source_scope, result)
+
+    def transform(copied):
+        if copied != snapshot.data or sha256(copied) != snapshot.sha256:
+            raise ConflictError("import_copy_mismatch")
+        parsed, actual_body = parse_document(encoded)
+        if parsed != metadata or actual_body != body:
+            raise FileError("import_conversion_mismatch")
+        return encoded
+
+    def before_publish():
+        verify_import_source(source_scope, result)
+        for scope, path, saved, _ in registered:
+            if scope.read(path).sha256 != saved.sha256:
+                raise ConflictError("import_registered_changed")
+
+    target_scope.write(target_path, snapshot.data, _prepare=transform, _before_publish=before_publish)
+    copied = target_scope.read(target_path)
+    if copied.data != encoded:
+        raise ConflictError("import_target_changed")
+    _, target_identity = _source_snapshot(target_scope, target_path)
+    if target_identity[:2] == identity[:2]:
+        raise ConflictError("import_copy_not_independent")
+    with target_scope._parent(target_path) as (parent, name):
+        if os.stat(name, dir_fd=parent, follow_symlinks=False).st_nlink != 1:
+            raise ConflictError("import_copy_not_independent")
+    verify_import_source(source_scope, result)
+    return result
 
 
 def _parts(value, absolute=False):
@@ -288,6 +572,56 @@ def _open_staging_dir(target_parent, acl):
         raise
 
 
+def _open_operation_staging(parent, acl):
+    """private root 안의 새 전용 디렉터리. 이름 충돌은 덮어쓰지 않는다."""
+    name = ".batang-op-" + uuid.uuid4().hex
+    os.mkdir(name, 0o700, dir_fd=parent)
+    fd = _open_dir(name, parent)
+    try:
+        acl.apply(fd, acl.empty)
+        os.fchmod(fd, 0o700)
+        info = os.fstat(fd)
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o700 or acl.read(fd) != acl.empty
+                or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)):
+            raise FileError("operation_staging_identity")
+        # 같은 절차를 쓰는 writer만 배제한다. 비협력 same-UID writer는 막지 못한다.
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return name, fd, info
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _cleanup_operation(parent, name, directory, expected, temporary, fd, temporary_info):
+    """호스트의 실제 배타 guard 안에서만 호출한다. 식별 실패 시 모두 보존한다."""
+    actual = os.fstat(directory)
+    current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if (not stat.S_ISDIR(actual.st_mode) or not stat.S_ISDIR(current.st_mode)
+            or (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino)
+            or (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino)
+            or actual.st_uid != os.geteuid() or current.st_uid != os.geteuid()
+            or stat.S_IMODE(actual.st_mode) != 0o700 or stat.S_IMODE(current.st_mode) != 0o700):
+        return
+    if fd is not None:
+        try:
+            staged = os.stat(temporary, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        held = os.fstat(fd)
+        if (not stat.S_ISREG(held.st_mode) or not stat.S_ISREG(staged.st_mode)
+                or (held.st_dev, held.st_ino) != (temporary_info.st_dev, temporary_info.st_ino)
+                or (staged.st_dev, staged.st_ino) != (temporary_info.st_dev, temporary_info.st_ino)
+                or held.st_uid != os.geteuid() or staged.st_uid != os.geteuid()
+                or held.st_nlink != 1 or staged.st_nlink != 1 or held.st_size or staged.st_size
+                or set(os.listdir(directory)) != {temporary}):
+            return
+        os.unlink(temporary, dir_fd=directory)
+    if not os.listdir(directory):
+        os.rmdir(name, dir_fd=parent)
+
+
 def _check_at(parent, name, fd, expected):
     actual = os.fstat(fd)
     current = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -318,11 +652,16 @@ def _read_at(parent, name):
 
 
 class FileScope:
-    def __init__(self, root, explicit_relative_paths):
+    def __init__(self, root, explicit_relative_paths, *, cleanup_guard=None):
         if isinstance(explicit_relative_paths, (str, bytes)):
             raise FileError("explicit_file_list")
         self.root_parts = _parts(root, absolute=True)
         self.allowed = frozenset(_parts(p) for p in explicit_relative_paths)
+        # None이면 삭제하지 않는다. guard는 호스트가 실제 writer 배타를 유지하는
+        # contextmanager factory이며 boolean을 보안 근거로 받지 않는다.
+        if cleanup_guard is not None and not callable(cleanup_guard):
+            raise FileError("cleanup_guard_context")
+        self.cleanup_guard = cleanup_guard
 
     @contextmanager
     def _parent(self, path):
@@ -345,7 +684,8 @@ class FileScope:
         with self._parent(path) as (parent, name):
             return _read_at(parent, name)
 
-    def write(self, path, data, expected_sha256=None, *, backup_scope=None, backup_path=None):
+    def write(self, path, data, expected_sha256=None, *, backup_scope=None, backup_path=None,
+              _prepare=None, _before_publish=None):
         if not isinstance(data, bytes):
             raise FileError("write_bytes")
         if expected_sha256 is not None and (not isinstance(expected_sha256, str)
@@ -371,14 +711,20 @@ class FileScope:
                 return False
             # 다른 플랫폼의 ACL 지원을 추가하지 않는다. Darwin 오류에는 fallback이 없다.
             acl = _MacOSACL() if sys.platform == "darwin" else None
-            staging_parent = _open_staging_dir(parent, acl)
-            descriptors.callback(os.close, staging_parent)
+            staging_root = _open_staging_dir(parent, acl)
+            descriptors.callback(os.close, staging_root)
             if previous is not None:
                 if backup_scope is None or backup_path is None:
                     raise FileError("backup_required")
                 original_acl = acl.read(original_fd) if acl else None
                 _check_at(parent, name, original_fd, original_info)
                 backup_scope.write(backup_path, previous.data)
+            operation, staging_parent, operation_info = _open_operation_staging(staging_root, acl)
+            descriptors.callback(os.close, staging_parent)
+            cleanup_allowed = False
+            if self.cleanup_guard is not None:
+                descriptors.enter_context(self.cleanup_guard(staging_parent))
+                cleanup_allowed = True
             temporary = ".batang-" + uuid.uuid4().hex + ".tmp"
             temporary_info = None
             fd = None
@@ -394,11 +740,22 @@ class FileScope:
                 with os.fdopen(fd, "wb", closefd=False) as stream:
                     stream.write(data)
                     stream.flush()
+                if _prepare is not None:
+                    data = _prepare(_read_fd_at(staging_parent, temporary, fd).data)
+                    if not isinstance(data, bytes):
+                        raise FileError("prepare_bytes")
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    with os.fdopen(fd, "wb", closefd=False) as stream:
+                        stream.write(data)
+                        stream.truncate()
+                        stream.flush()
                 if acl and previous is not None:
                     acl.apply(fd, original_acl)
                 os.fchmod(fd, previous.mode if previous else 0o600)
                 os.fsync(fd)
                 ready = os.fstat(fd)
+                if ready.st_nlink != 1 or ready.st_uid != os.geteuid():
+                    raise ConflictError("changed_temporary_links_or_owner")
                 if stat.S_IMODE(ready.st_mode) != (previous.mode if previous else 0o600):
                     raise ConflictError("changed_temporary_mode")
                 if (ready.st_dev, ready.st_ino) != (temporary_info.st_dev, temporary_info.st_ino):
@@ -408,6 +765,8 @@ class FileScope:
                     raise FileError("acl_verification")
                 if _read_fd_at(staging_parent, temporary, fd).data != data:
                     raise ConflictError("changed_temporary_contents")
+                if _before_publish is not None:
+                    _before_publish()
                 if previous is None:
                     _check_at(staging_parent, temporary, fd, ready)
                     publication_started = True
@@ -426,12 +785,24 @@ class FileScope:
                 return True
             finally:
                 try:
-                    if fd is not None and not publication_started:
+                    interrupted = sys.exc_info()[0] is not None and not issubclass(sys.exc_info()[0], Exception)
+                    if fd is not None and not publication_started and not interrupted:
                         # 경로의 stat→unlink는 타인의 교체 파일을 지울 수 있다.
                         # fd가 가리키는 우리 임시 inode만 비우고 0600으로 제한한다.
                         # 게시를 시도한 뒤에는 대상 inode일 수 있어 비우지 않는다.
-                        os.fchmod(fd, 0o600)
-                        os.ftruncate(fd, 0)
+                        held = os.fstat(fd)
+                        if (stat.S_ISREG(held.st_mode) and held.st_nlink == 1
+                                and held.st_uid == os.geteuid()
+                                and (held.st_dev, held.st_ino) == (temporary_info.st_dev, temporary_info.st_ino)):
+                            os.fchmod(fd, 0o600)
+                            os.ftruncate(fd, 0)
+                    if cleanup_allowed and not interrupted:
+                        if not publication_started and fd is not None:
+                            _cleanup_operation(staging_root, operation, staging_parent, operation_info,
+                                               temporary, fd, temporary_info)
+                        elif publication_started and sys.exc_info()[0] is None:
+                            _cleanup_operation(staging_root, operation, staging_parent, operation_info,
+                                               temporary, None, None)
                 finally:
                     if fd is not None:
                         os.close(fd)
