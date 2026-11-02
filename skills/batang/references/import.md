@@ -18,6 +18,8 @@
 
 이 문서의 v1·v2는 제품 버전이 아닌 `batang_schema_version` 메타데이터 형식 버전이다.
 
+새 관리 문서의 대상 이름은 호스트가 [지식 계약의 명명 규칙](knowledge-contract.md#관리-문서-이름)에 따라 선택하고 `target_path`로 명시한다. 기존 원천 파일을 일괄 변경하지 않는다.
+
 관리 문서의 정규 형식은 [지식 계약](knowledge-contract.md)이다. `batang_schema_version` 또는 `batang_id`가 있는 문서는 기존 관리 문서로 판단하며 필수 일곱 key가 모두 유효해야 한다. 누락된 필수 key를 일반 YAML이나 무메타데이터 이관의 기본값으로 보충하지 않고 보류한다. `tags`, `aliases`, `subject`만 있는 일반 YAML은 신규 v2 변환 대상이다. 가져오기 입력은 Obsidian의 지원 속성 범위에 해당하는 평면 키와 문자열·유한 숫자·boolean·null·날짜 문자열, flow/block 목록을 보존한다. 관리 출처에 필요한 목록·객체도 읽는다. 범용 YAML 지원이 아니다. 중복 key·anchor·tag·merge key·복합 key와 지원하지 않는 중첩·복잡 구조는 보류하고 이유를 알린다. 확인하지 못한 출처를 추측하거나 미지원 속성을 버리지 않는다.
 
 ## 호스트와 도우미

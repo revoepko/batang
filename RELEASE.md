@@ -2,6 +2,12 @@
 
 [한국어](RELEASE.ko.md)
 
+## 0.1.0-b
+
+### Changed
+
+- New managed documents use short, clear topic filenames without IDs. The internal `batang_id` remains; add the subject or target to distinguish a collision. Existing documents are renamed only when explicitly requested. [Naming guidance](skills/batang/references/knowledge-contract.md#관리-문서-이름)
+
 ## 0.1.0-a
 
 ### Changed

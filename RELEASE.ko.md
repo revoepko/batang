@@ -2,6 +2,12 @@
 
 [English](RELEASE.md)
 
+## 0.1.0-b
+
+### 변경
+
+- 새 관리 문서는 ID 없는 짧고 명확한 주제의 파일명을 사용합니다. 내부 `batang_id`는 유지하며 충돌 시 대상이나 주제를 보충합니다. 기존 문서 이름은 명시적으로 요청한 경우에만 변경합니다. [명명 규칙](skills/batang/references/knowledge-contract.md#관리-문서-이름)
+
 ## 0.1.0-a
 
 ### 변경

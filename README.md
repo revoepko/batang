@@ -74,6 +74,8 @@ Batang answers from the notes you select. Relationship maps and diagrams are sup
 - It saves nothing from a conversation automatically.
 - When you ask for an update, it changes only the target you specify and makes a backup before editing an existing note.
 
+New managed notes use a short, clear topic as the filename without an ID. The internal ID remains unchanged; add the subject or target to distinguish a collision. Existing notes are renamed only when explicitly requested. [Naming guidance](skills/batang/references/knowledge-contract.md#관리-문서-이름)
+
 For details, see [Reading and saving notes](skills/batang/references/source-access.md) and [Note format and sources](skills/batang/references/knowledge-contract.md).
 
 You can also import notes written elsewhere. Batang registers copies of the selected notes and their sources, then checks the links between copies. It leaves the originals unchanged. If an attribute or link needs review, it is preserved and Batang explains why. See [import guidance](skills/batang/references/import.md).
