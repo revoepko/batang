@@ -11,8 +11,8 @@
 ## 계획 요약
 
 - `D1` `user_confirmed`: 지정 목록의 두 파일만 읽는다. vault·목록·Graphify 결과는 수정하지 않는다.
-- `D2` `delegated_ai`: 새 run이면 단일 bundle snapshot의 `skills/batang`과 내부 마디 절차 경로, `SHA256SUMS` 자체의 hash, profile hash를 기록한다.
-- `A1` `assumption`: Graphify의 준비 상태는 호스트에서 확인해야 한다. 경로를 확인하지 못하면 준비는 `BLOCKED`이고 다른 도구를 설치하거나 찾지 않는다.
+- `D2` `delegated_ai`: 새 run이면 단일 bundle snapshot의 `skills/batang`과 내부 마디 절차 경로, `SHA256SUMS` 자체의 hash를 기록한다. profile을 저장한 경우 그 hash도 기록한다.
+- `A1` `assumption`: 직접 Markdown을 검토하는 이 계획에는 Graphify와 Archify가 필요하지 않다. 관계 작업이 추가되면 호스트가 해당 도구의 경로와 권한을 확인한다.
 
 | 요구 | acceptance | 예정 검증 |
 |---|---|---|

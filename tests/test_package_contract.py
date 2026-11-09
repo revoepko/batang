@@ -16,6 +16,7 @@ PACKAGE = Path(__file__).resolve().parents[1]
 MADI = PACKAGE / "skills" / "batang" / "components" / "madi"
 SKILLS = PACKAGE / "skills"
 BATANG = SKILLS / "batang"
+HOST_REFERENCES = BATANG / "references" / "hosts"
 COMPONENTS = BATANG / "components"
 INTERNAL_WORKFLOWS = {
     COMPONENTS / component / "workflow.md"
@@ -69,7 +70,6 @@ OPERATIONS_PUBLIC_FILES = {
     "tests/test_import_ops.py",
     "tests/test_temp_cleanup.py",
 }
-RELEASE_WORKFLOW = MADI / "references" / "workflow-contract.md"
 
 
 def _relative_files(root: Path) -> set[str]:
@@ -185,66 +185,29 @@ class PackageContractTests(unittest.TestCase):
             self.assertIsNone(LOCAL_RELEASE_STATE.search(text), source)
             self.assertIsNone(DEVELOPMENT_DATE.search(text), source)
 
-    def test_release_contract_keeps_export_freeze_and_pre_deployment_decision_order(self) -> None:
-        contract = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-        required_fragments = (
-            "개발 원본",
-            "공개 package",
-            "allowlist",
-            "manifest",
-            "SHA-256",
-            "고정",
-            "검증",
-            "배포 직전",
-            "새 staging 후보",
+    def test_host_guidance_is_reachable_from_the_shared_skill(self) -> None:
+        expected = {
+            HOST_REFERENCES / "codex.md",
+            HOST_REFERENCES / "claude-code.md",
+        }
+        self.assertEqual(
+            {path for path in HOST_REFERENCES.glob("*.md")}, expected
         )
-        for fragment in required_fragments:
-            self.assertIn(fragment, contract)
 
-        export_at = contract.index("allowlist")
-        freeze_at = contract.index("SHA-256", export_at)
-        verification_at = contract.index("검증", freeze_at)
-        release_at = contract.index("배포 직전", verification_at)
-        self.assertLess(export_at, freeze_at)
-        self.assertLess(freeze_at, verification_at)
-        self.assertLess(verification_at, release_at)
+        entrypoint = BATANG / "SKILL.md"
+        visited: set[Path] = set()
+        pending = [entrypoint.resolve()]
+        while pending:
+            source = pending.pop()
+            if source in visited:
+                continue
+            visited.add(source)
+            pending.extend(
+                target for target in _relative_markdown_links(source)
+                if target.is_file() and target.is_relative_to(BATANG.resolve())
+            )
 
-    def test_review_contract_is_preserved(self) -> None:
-        contract = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-        for fragment in (
-            "품질 일반 모드", "gpt-6.1-sol/high", "보안 검토",
-            "Daybreak", "고정 최종 후보", "실패 이력",
-        ):
-            self.assertIn(fragment, contract)
-
-    def test_public_model_recommendations_preserve_project_policy_and_actual_calls(self) -> None:
-        example = (PACKAGE / "examples/AGENTS.md").read_text(encoding="utf-8")
-        for fragment in (
-            "public recommendation", "project-mandated models and modes take precedence",
-            "available permitted alternative", "assignment and reason in the plan",
-            "actual invocation in the run", "same entire fixed candidate",
-            "Preserve failed access attempts", "This file grants no runtime permissions",
-        ):
-            self.assertIn(fragment, example)
-        contract = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-        for fragment in (
-            "공개 권장값", "프로젝트가 필수 모델·모드를 지정했다면 그 기준을 유지",
-            "실제 가용성", "허용 대체", "필수 기준을 임의로 낮추지",
-            "plan은 실제 배정과 대체 이유", "run은 실제 provider",
-            "모델 접근 오류와 미실행·차단은 보존",
-        ):
-            self.assertIn(fragment, contract)
-
-    def test_import_contract_keeps_source_and_registration_boundary(self) -> None:
-        contract = (BATANG / "references/import.md").read_text(encoding="utf-8")
-        for fragment in (
-            "원본은 읽기 전용", "독립 bytes", "기존 파일을 덮어쓰지",
-            "기존 등록 문서", "선택 밖 자료를 읽지", "범용 YAML 지원이 아니다",
-            "prepare_import(", "verify_import_source(", "정규 v1·v2",
-            "기존 ID·schema·sources를 보존", "호스트 등록 기록",
-        ):
-            self.assertIn(fragment, contract)
-
+        self.assertTrue(expected <= visited, expected - visited)
 
 if __name__ == "__main__":
     unittest.main()

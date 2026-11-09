@@ -8,15 +8,21 @@ Batang helps you organize selected notes with links to their sources, then find 
 
 ## Get started
 
-The supported environment is **Codex on macOS ARM64**. The required software is listed below.
+Use Batang with Codex CLI, the ChatGPT app, Claude Code CLI or the Claude app on macOS ARM64.
 
-| Required software | Purpose |
+The required software is listed below.
+
+| Software | When it is used |
 |---|---|
 | [Obsidian](https://obsidian.md/download) | Storing and managing your notes. |
 | [Graphify](https://github.com/Graphify-Labs/graphify) | Organizing relationships between notes and concepts. |
 | [Archify](https://github.com/tt-a1i/archify) | Creating an explanation or diagram when you request one. |
 
-Graphify uses Python, and Archify uses Node.js as its runtime. If a required tool is missing, you can ask Codex to help install it. See [Third-party notices](THIRD_PARTY.md) for the versions checked and more details.
+Direct Markdown lookup needs neither Graphify nor Archify. Graphify is needed for relationship work and approved refreshes; Archify is needed only for requested visualizations.
+
+Graphify uses Python, and Archify uses Node.js as its runtime. If a required tool is missing, you can ask the AI you use to help install it.
+
+See [Third-party notices](THIRD_PARTY.md) for the versions checked and more details.
 
 Clone the repository and enter its folder:
 
@@ -25,17 +31,36 @@ git clone https://github.com/revoepko/batang.git
 cd batang
 ```
 
-In this folder, open Codex and ask:
+In this folder, open the AI tool you want to use and ask:
 
 ```text
 Please install Batang according to this folder's AGENTS.md.
 ```
 
-Codex confirms the project folder where you will use Batang and the vault where you keep your notes. The project is the folder where you work with Codex; it does not have to be the vault. Codex records confirmed settings in the project's `AGENTS.md` and preserves existing settings and skill registrations.
+The AI confirms the project folder where you will use Batang and the vault where you keep your notes. The project is the folder where you work with the AI; it does not have to be the vault.
 
-Tell Codex whether you want to import existing notes and which notes to use. You can also prepare an empty vault to start fresh. Imported notes are copied, leaving the originals unchanged.
+Within the approved scope, the AI records confirmed settings using the project's applicable policy and existing recording practice and preserves existing settings and skill registrations.
+
+Tell the AI whether you want to import existing notes and which notes to use. You can also prepare an empty vault to start fresh. Imported notes are copied, leaving the originals unchanged.
+
+All use the same Batang skill.
+
+For Codex CLI and the ChatGPT app, see the [Codex guide](skills/batang/references/hosts/codex.md).
+
+For Claude Code CLI and the Claude app, see the [Claude guide](skills/batang/references/hosts/claude-code.md).
 
 ## Try it with natural language
+
+First, invoke Batang in the AI tool you use.
+
+- Codex CLI: start your request with `$batang`.
+- ChatGPT app: type `@` and select the Batang skill.
+- Claude Code CLI and the Claude app: start your request with `/batang`.
+
+Batang applies to the task you invoke it for and follow-up requests for that task.
+It does not automatically apply to unrelated tasks.
+
+Your existing AI instructions and agent roles remain unchanged.
 
 | Example request | Expected result |
 |---|---|
@@ -66,7 +91,11 @@ Tell Codex whether you want to import existing notes and which notes to use. You
 
 These components belong to one Batang skill. The host AI connects the relevant procedures and tools you have prepared, and carries out the work.
 
+Work can be divided among multiple AIs, and another AI can review the result.
+
 Batang answers from the notes you select. Relationship maps and diagrams are supporting material that helps explain them.
+
+It checks when the source material applies and under what conditions. If sources conflict or their current validity cannot be confirmed, it tells you.
 
 ## Reading and changes
 

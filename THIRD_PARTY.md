@@ -8,7 +8,7 @@ The package does not include a user's vault, notes, operational records, backups
 
 ## Tools required for setup
 
-The host must have access to the selected Obsidian Markdown and configured Graphify and Archify paths before the supported workflow is ready. This is a preparation requirement, not a promise that all tools run on every request. Obsidian is not opened or registered automatically; Graphify is used for relationship work and approved refreshes; Archify runs only for a requested explanation or diagram.
+The host needs access to the selected Markdown for the requested work. Direct Markdown lookup requires neither Graphify nor Archify. Prepare the configured Graphify path for relationship work and approved refreshes, and the Archify path only for requested visualizations. Obsidian is not opened or registered automatically.
 
 | Tool | Upstream | Host preparation and use | Included in this package |
 |---|---|---|---|

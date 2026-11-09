@@ -8,15 +8,21 @@
 
 ## 시작하기
 
-지원 환경은 **Codex / macOS ARM64**입니다. 필요한 소프트웨어는 다음과 같습니다.
+macOS ARM64에서 Codex CLI, ChatGPT 앱, Claude Code CLI, Claude 앱으로 바탕을 사용할 수 있습니다.
 
-| 필수 설치 소프트웨어 | 용도 |
+필요한 소프트웨어는 다음과 같습니다.
+
+| 소프트웨어 | 사용 시점 |
 |---|---|
 | [Obsidian](https://obsidian.md/download) | 노트를 보관하고 관리합니다. |
 | [Graphify](https://github.com/Graphify-Labs/graphify) | 노트와 개념 사이의 관계를 정리합니다. |
 | [Archify](https://github.com/tt-a1i/archify) | 요청하신 설명이나 도면을 만들 때 사용합니다. |
 
-Graphify는 Python을, Archify는 Node.js를 실행 환경으로 사용합니다. 필요한 도구가 없다면 Codex에게 함께 설치해 달라고 요청할 수 있습니다. 확인한 버전과 자세한 내용은 [Third-party notices](THIRD_PARTY.md)에 있습니다.
+Markdown 직접 조회에는 Graphify와 Archify가 필요하지 않습니다. Graphify는 관계 작업과 승인된 갱신에, Archify는 요청된 시각화에 필요합니다.
+
+Graphify는 Python을, Archify는 Node.js를 실행 환경으로 사용합니다. 필요한 도구가 없다면 사용하는 AI에게 함께 설치해 달라고 요청할 수 있습니다.
+
+확인한 버전과 자세한 내용은 [Third-party notices](THIRD_PARTY.md)에 있습니다.
 
 저장소를 클론하고 폴더로 이동하세요.
 
@@ -25,17 +31,36 @@ git clone https://github.com/revoepko/batang.git
 cd batang
 ```
 
-이 폴더에서 Codex를 열고 다음과 같이 요청하세요.
+이 폴더에서 사용할 AI 도구를 열고 다음과 같이 요청하세요.
 
 ```text
 이 폴더의 AGENTS.md에 따라 바탕을 설치해 주세요.
 ```
 
-Codex는 바탕을 사용할 프로젝트 폴더와 노트를 보관할 볼트를 확인합니다. 프로젝트는 Codex로 작업하는 폴더이며 볼트와 같은 위치일 필요는 없습니다. 확인한 설정은 프로젝트의 `AGENTS.md`에 기록합니다. 기존 설정과 스킬 등록은 보존합니다.
+AI는 바탕을 사용할 프로젝트 폴더와 노트를 보관할 볼트를 확인합니다. 프로젝트는 AI와 작업하는 폴더이며 볼트와 같은 위치일 필요는 없습니다.
 
-기존 노트를 가져올지, 어떤 노트를 사용할지 Codex에 알려 주세요. 새로 시작한다면 빈 볼트를 준비할 수도 있습니다. 다른 곳에서 가져온 노트는 사본을 사용하고 원본을 보존합니다.
+확인한 설정은 승인 범위에서 프로젝트의 실제 정책과 기록 방식에 반영합니다. 기존 설정과 스킬 등록은 보존합니다.
+
+기존 노트를 가져올지, 어떤 노트를 사용할지 사용하는 AI에게 알려 주세요. 새로 시작한다면 빈 볼트를 준비할 수도 있습니다. 다른 곳에서 가져온 노트는 사본을 사용하고 원본을 보존합니다.
+
+모두 같은 바탕 스킬을 사용합니다.
+
+Codex CLI와 ChatGPT 앱은 [Codex 안내](skills/batang/references/hosts/codex.md)를 참고하세요.
+
+Claude Code CLI와 Claude 앱은 [Claude 안내](skills/batang/references/hosts/claude-code.md)를 참고하세요.
 
 ## 자연어로 요청하기
+
+먼저 사용하는 AI에서 바탕을 호출하세요.
+
+- Codex CLI: 요청 앞에 `$batang`을 입력합니다.
+- ChatGPT 앱: `@`를 입력하고 바탕 스킬을 선택합니다.
+- Claude Code CLI와 Claude 앱: 요청 앞에 `/batang`을 입력합니다.
+
+바탕은 호출한 작업과 이어지는 후속 요청에 적용됩니다.
+다른 작업에는 자동으로 적용하지 않습니다.
+
+기존 AI 규칙과 에이전트 역할은 그대로 유지됩니다.
 
 | 요청 예시 | 예상 결과 |
 |---|---|
@@ -66,7 +91,11 @@ Codex는 바탕을 사용할 프로젝트 폴더와 노트를 보관할 볼트�
 
 이 구성 요소들은 하나의 바탕 스킬에 들어 있습니다. 호스트 AI가 요청에 필요한 절차와 사용자가 준비한 도구를 연결하고 실제 실행을 맡습니다.
 
+필요한 작업을 여러 AI에게 나누어 맡기고, 작성 결과를 다른 AI가 검토할 수 있습니다.
+
 바탕은 선택한 노트를 근거로 답합니다. 관계도와 그림은 이해를 돕는 보조 자료입니다.
+
+답변에 사용할 원문의 적용 시점과 조건을 확인합니다. 자료가 서로 충돌하거나 현재 효력을 확인하지 못하면 그 상태를 알려 드립니다.
 
 ## 노트 읽기와 변경
 

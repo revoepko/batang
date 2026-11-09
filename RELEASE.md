@@ -2,6 +2,23 @@
 
 [한국어](RELEASE.ko.md)
 
+## 0.1.1
+
+### Changed
+
+- Batang now applies only to tasks where you explicitly invoke it and follow-up requests for those tasks.
+- Updated shared procedures to follow applicable user, project and host rules, and added Codex and Claude Code host guidance.
+- Clarified delegation, independent review and evidence handoff within the single skill, while preserving personal host settings and project requirements.
+- Guidance explains how to use the same Batang skill in Codex and Claude Code and continue work from shared material and work records.
+- Direct Markdown lookup needs neither Graphify nor Archify. Graphify is used for relationship work and approved refreshes; Archify is used for requested visualizations.
+- When a graph is missing, outdated or incomplete, Batang checks the current Markdown to answer and reports the state of the relationship data.
+- Batang checks when and under what conditions sources apply, including conflicting evidence.
+- Valid preparation checks are reused when the target, settings, versions, permissions and Batang files remain the same. Relevant changes, errors or uncertain conditions trigger a check of the affected parts.
+
+### Compatibility
+
+- If an existing installation has instructions to always use Batang, update them to apply only to tasks where you invoke Batang. Keep other AI instructions and agent roles unchanged.
+
 ## 0.1.0-b
 
 ### Changed
