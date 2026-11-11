@@ -8,7 +8,7 @@ Batang helps you organize selected notes with links to their sources, then find 
 
 ## Get started
 
-Use Batang with Codex CLI, the ChatGPT app, Claude Code CLI or the Claude app on macOS ARM64.
+Use Batang with Codex CLI or the ChatGPT app on macOS ARM64.
 
 The required software is listed below.
 
@@ -47,15 +47,12 @@ All use the same Batang skill.
 
 For Codex CLI and the ChatGPT app, see the [Codex guide](skills/batang/references/hosts/codex.md).
 
-For Claude Code CLI and the Claude app, see the [Claude guide](skills/batang/references/hosts/claude-code.md).
-
 ## Try it with natural language
 
 First, invoke Batang in the AI tool you use.
 
 - Codex CLI: start your request with `$batang`.
 - ChatGPT app: type `@` and select the Batang skill.
-- Claude Code CLI and the Claude app: start your request with `/batang`.
 
 Batang applies to the task you invoke it for and follow-up requests for that task.
 It does not automatically apply to unrelated tasks.

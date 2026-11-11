@@ -75,7 +75,7 @@ execution_boundary.authority_basis / scope: 비어 있지 않은 근거와 범�
 
 ## 설치와 복구의 기록 경계
 
-호스트별 등록 위치는 [Codex](../../../references/hosts/codex.md)와 [Claude Code](../../../references/hosts/claude-code.md) 안내를 따른다. 바탕 skill 하나만 등록한다. 마디 절차는 `skills/batang/components/madi/workflow.md`에 내부 문서로 보존한다. 재현 가능한 설치는 전체 checkout을 고정 revision으로 유지하고 `skills/batang`에 대한 단일 skill 등록을 만든다. 전체 checkout을 보존해야 내부 문서와 프로젝트 예시의 상대 참조가 유효하다.
+등록 위치는 [Codex 안내](../../../references/hosts/codex.md)를 따른다. 바탕 skill 하나만 등록한다. 마디 절차는 `skills/batang/components/madi/workflow.md`에 내부 문서로 보존한다. 재현 가능한 설치는 전체 checkout을 고정 revision으로 유지하고 `skills/batang`에 대한 단일 skill 등록을 만든다. 전체 checkout을 보존해야 내부 문서와 프로젝트 예시의 상대 참조가 유효하다.
 
 전환 전 현재 Batang 및 Madi 등록의 정확한 경로와 link target을 관찰한다. 기존 Madi link가 이 설치의 이전 snapshot을 가리키는 예상 대상이며 소유가 확인된 경우에만 전환 계획에 따라 회수한다. 대상이 다르거나 소유가 불명확하면 멈추고 보고한다. 의도한 새 Batang 등록이 이미 있으면 중복 추가하지 않으며, 다른 checkout을 가리키는 기존 Batang 등록은 구체적인 변경안 없이 덮어쓰거나 삭제하지 않는다. 이전 snapshot과 기존 run은 그대로 둔다.
 

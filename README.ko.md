@@ -8,7 +8,7 @@
 
 ## 시작하기
 
-macOS ARM64에서 Codex CLI, ChatGPT 앱, Claude Code CLI, Claude 앱으로 바탕을 사용할 수 있습니다.
+macOS ARM64에서 Codex CLI와 ChatGPT 앱으로 바탕을 사용할 수 있습니다.
 
 필요한 소프트웨어는 다음과 같습니다.
 
@@ -47,15 +47,12 @@ AI는 바탕을 사용할 프로젝트 폴더와 노트를 보관할 볼트를 �
 
 Codex CLI와 ChatGPT 앱은 [Codex 안내](skills/batang/references/hosts/codex.md)를 참고하세요.
 
-Claude Code CLI와 Claude 앱은 [Claude 안내](skills/batang/references/hosts/claude-code.md)를 참고하세요.
-
 ## 자연어로 요청하기
 
 먼저 사용하는 AI에서 바탕을 호출하세요.
 
 - Codex CLI: 요청 앞에 `$batang`을 입력합니다.
 - ChatGPT 앱: `@`를 입력하고 바탕 스킬을 선택합니다.
-- Claude Code CLI와 Claude 앱: 요청 앞에 `/batang`을 입력합니다.
 
 바탕은 호출한 작업과 이어지는 후속 요청에 적용됩니다.
 다른 작업에는 자동으로 적용하지 않습니다.

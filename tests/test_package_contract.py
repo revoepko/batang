@@ -188,7 +188,6 @@ class PackageContractTests(unittest.TestCase):
     def test_host_guidance_is_reachable_from_the_shared_skill(self) -> None:
         expected = {
             HOST_REFERENCES / "codex.md",
-            HOST_REFERENCES / "claude-code.md",
         }
         self.assertEqual(
             {path for path in HOST_REFERENCES.glob("*.md")}, expected

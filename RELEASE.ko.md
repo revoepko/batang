@@ -2,6 +2,13 @@
 
 [English](RELEASE.md)
 
+## 0.1.1-a
+
+### 변경
+
+- 지원 호스트를 Codex CLI와 ChatGPT 앱으로 정리했습니다.
+- Claude 전용 안내와 설정 예시를 제거했습니다.
+
 ## 0.1.1
 
 ### 변경

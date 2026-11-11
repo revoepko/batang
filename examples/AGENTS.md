@@ -2,15 +2,7 @@
 
 This Markdown is a reference for the selected host. It is not a machine-readable configuration file and this package has no YAML configuration loader. Copy or merge only the sections needed into the target project's applicable existing policy file; do not replace the whole file. Use paths confirmed for that project and vault. Apply Batang-specific instructions only when the user explicitly invokes Batang and for follow-ups to that same task; retain general personal and project rules, roles, and permissions for all tasks.
 
-## Using the example with Claude Code
-
-For Codex CLI and the ChatGPT app, merge the needed instructions into the project's applicable `AGENTS.md`. For Claude Code CLI and a local Code session in the Claude app, preserve the existing `CLAUDE.md` and add this reference if the project keeps its shared instructions in `AGENTS.md`:
-
-```markdown
-@AGENTS.md
-```
-
-This example assumes both files are in the project root. Adjust the reference to the actual location and confirm that the session reads the intended instructions. Create a missing policy file only within the approved setup scope. The reference imports project instructions; it does not invoke the Batang skill. Registering the skill is a separate step described in the [Claude guide](../skills/batang/references/hosts/claude-code.md). Apply Batang-specific workflows when the user explicitly invokes Batang and for follow-ups to that same task, not to an unrelated new task. Preserve general personal and project rules, existing role mappings, and permissions.
+Merge the needed instructions into the project's applicable `AGENTS.md`. Registering the skill is a separate step described in the [Codex guide](../skills/batang/references/hosts/codex.md).
 
 ## Batang values
 

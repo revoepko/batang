@@ -2,6 +2,13 @@
 
 [한국어](RELEASE.ko.md)
 
+## 0.1.1-a
+
+### Changed
+
+- Limited the supported hosts to Codex CLI and the ChatGPT app.
+- Removed Claude-specific guidance and configuration examples.
+
 ## 0.1.1
 
 ### Changed
