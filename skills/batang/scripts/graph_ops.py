@@ -52,6 +52,11 @@ class GraphUpdateResult:
     note_query_allowed: bool = True
     graph_written: bool | None = False
     publication_uncertain: bool = False
+    candidate_status: str | None = None
+    relation_status: str | None = None
+    review_id: str | None = None
+    review_work_status: str | None = None
+    judgment_summary: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +81,7 @@ def _active_paths(data):
     except UnicodeError:
         raise GraphError("active_encoding") from None
     paths = []
+    seen_paths = set()
     for line in text.split("\n"):
         match = re.fullmatch(r"- \[[^\]\n]*\]\(([^)\n]+)\)\r?", line)
         if not match:
@@ -85,9 +91,10 @@ def _active_paths(data):
         if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
             raise GraphError("active_path_invalid")
         path = _relative(unquote(value, errors="strict"))
-        if path in paths:
+        if path in seen_paths:
             raise GraphError("active_duplicate_path")
         paths.append(path)
+        seen_paths.add(path)
     return tuple(paths)
 
 
@@ -392,6 +399,15 @@ def _build_from_snapshot(old, prepared, paths, root=None):
     # 갱신한 semantic source만 교체하고 같은 source의 AST 층은 보존한다.
     nodes = [copy.deepcopy(item) for item in old["nodes"] if _retained(item, paths)]
     edges = [copy.deepcopy(item) for item in old["links"] if _retained(item, paths)]
+    if not old["directed"]:
+        for edge in edges:
+            # 무방향 node-link 직렬화는 endpoint 순서를 바꿀 수 있다. Graphify
+            # build가 _src/_tgt를 입력 순서로 다시 쓰므로, 동일 endpoint 쌍의
+            # 유효한 원방향만 복원해 보존한다. 부분·외부 marker는 신뢰하지 않는다.
+            source, target = edge.get("_src"), edge.get("_tgt")
+            if (isinstance(source, str) and isinstance(target, str)
+                    and sorted((source, target)) == sorted((edge["source"], edge["target"]))):
+                edge["source"], edge["target"] = source, target
     hyperedges = old.get("graph", {}).get("hyperedges", [])
     if not isinstance(hyperedges, list) or any(not isinstance(item, dict) for item in hyperedges):
         raise GraphError("graph_hyperedges_invalid")
@@ -416,7 +432,8 @@ def _work_paths(work_scope, baseline_path, candidate_path, graph_scope, graph_pa
 
 def refresh_graph(active_documents, chunks, *, expected_chunk_ids, graph_scope,
                   graph_path, expected_graph_sha256, work_scope, baseline_path,
-                  candidate_path, backup_scope=None, backup_path=None, read_only=False):
+                  candidate_path, backup_scope=None, backup_path=None, read_only=False,
+                  relationship_request=None):
     """호스트가 허용한 갱신 한 번. 실패는 대기로 반환하며 자동 재시도하지 않는다.
 
     expected_chunk_ids는 {문서 상대경로: [예상 chunk ID,...]}다. 각 chunk는
@@ -426,6 +443,15 @@ def refresh_graph(active_documents, chunks, *, expected_chunk_ids, graph_scope,
     work_scope에는 아직 없는 baseline_path/candidate_path를 명시 허용한다.
     read_only는 실행 선택값이며 권한 인증을 대신하지 않는다.
     """
+    if relationship_request is not None:
+        from relationship_ops import refresh_relationships
+        return refresh_relationships(
+            active_documents, chunks, expected_chunk_ids=expected_chunk_ids,
+            graph_scope=graph_scope, graph_path=graph_path,
+            expected_graph_sha256=expected_graph_sha256, work_scope=work_scope,
+            baseline_path=baseline_path, candidate_path=candidate_path,
+            backup_scope=backup_scope, backup_path=backup_path, read_only=read_only,
+            relationship_request=relationship_request)
     old_bytes = None
     publication_started = False
     try:

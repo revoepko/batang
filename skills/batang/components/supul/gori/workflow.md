@@ -6,16 +6,34 @@ aliases가 붙은 노드는 원문 ID·hash·tags를 보존하고 같은 별칭�
 
 Graphify의 최초 생성과 갱신은 허용된 활성 원문과 기존 라이브러리로 수행한다. 그래프가 없으면 첫 생성의 범위와 권한을 확인하고, 문서 ID·hash에 대응하는 노드를 포함한다. 관계가 없는 노드에 근거 없는 연결을 만들지 않는다. 새 batch 서비스·provider나 기존 도구 source 복사·수정은 하지 않는다.
 
+## 문서 간 관계 검토
+
+[조회 안내](../../../references/query.md)의 원 기록 조회와 확정 관계 표시 투영을 구분한다. 검토 준비는 [고정 호출](../../../references/calls.md)의 `prepare_review_context`를 사용하고, 누락 가능성을 살펴 필요한 근거를 추가 조회한다. 등록 전에는 명시 허용된 자료의 내용만 준비한다. 승인된 등록 후 실제 활성 문서를 다시 구성해 기존 후보 탐색과 갱신을 수행한다.
+
+관계 갱신이 승인되고 문서 간 관계 형식을 사용하는 경우, 호스트는 대상 문서 내부의 추출만으로 관계 검토를 완료하지 않는다. 읽기가 허용된 기존 활성 문서에서 명시 링크·인용·ID·제목·별칭·태그·본문 개념을 단서로 후보를 찾고, 각 후보의 현재 원문과 기존 영향 관계를 비교해 근거·방향·적용 조건을 검토한다. 태그나 이름의 일치만으로 관계를 확정하지 않는다. 후보가 없거나 판단이 어려운 결과도 판단 근거와 함께 구분한다. 후보 탐색이 불완전하거나 미검토·읽기 불가·판단 충돌이 있으면 검토 작업을 완료로 표시하지 않는다. 현재 근거를 검토해 타당하게 `deferred`로 판단한 경우는 관계 확정 보류와 작업 완료를 구분한다.
+
+대상 문서의 추출물을 교체할 권한과 기존 문서를 비교할 권한을 구분한다. 비교 문서의 본문·metadata·기존 semantic 노드를 덮어쓰지 않는다. 채택한 기존 endpoint는 허용된 활성 문서인지, 문서 ID와 실제 graph node가 대응하는지, 읽은 원문 hash가 현재인지 확인한다. 누락·stale·접근 불가인 참조는 임의로 갱신하지 않고 해당 관계를 대기로 둔다. `active_index`는 읽기나 변경 권한을 부여하지 않는다.
+
+하나의 관계는 문서 쌍·종류·방향·의미 조건으로 구분하고, 다른 관계나 독립 근거가 덮이지 않도록 한다. 근거 문서의 ID·hash·위치와 추출 또는 추론 여부를 남기되 원문 전문을 복제하지 않는다. 이름이나 경로만 바뀐 경우와 문서 ID·관계 의미가 바뀐 경우를 구분한다. 문서 또는 근거를 읽을 수 없으면 삭제로 추정하지 않고 현재 확정 관계에서 제외한다. 조회는 읽기 전용이며 그래프나 검토 상태를 자동 수정하지 않는다.
+
+후보 문서의 각 절에서 실제 주장과 조건을 대조한다. 내용을 적용하라는 지시를 항상 내용 전체에 대한 의존으로, 유지하라는 표현을 언제나 검사로 해석하지 않는다. 일부 항목의 조건을 문서 전체의 계약으로 확대하지 않고 적용 대상·버전·범위와 의미 강도를 함께 확인한다. 하나의 문서 쌍에서 관계 하나를 채택하면서 다른 종류·조건은 판단 보류할 수 있다. 개별 관계의 `assertion_decisions`와 보류·재채택·근거 철회 절차는 [문서 간 관계 처리](../../../references/relationships.md)를 따른다.
+
+문서 참조와 내용 의존을 구분한다. `depends_on` 후보는 한 문서의 과제·필요, 다른 문서의 정의·제공 내용이나 제한, 대상·범위·기능이 연결된 근거를 살핀다. 내용 의존 추론을 실제 채택·구현·성공으로 확대하지 않는다. 좁은 의존에 완료·성공·하이퍼링크나 양쪽 문서의 모든 정의 반복을 필수화하지 않되, 핵심 연결이나 판단에 필요한 대상·시점이 불명확하면 보류한다. 단어 일치나 가능성만으로 채택하지 않고 독립적인 병행 규칙이라는 대안이 원문에 근거하는지도 대조한다. `INFERRED`는 추론 표기이며 채택 근거를 대신하지 않는다. 자세한 기준은 [내용 의존의 근거 검토](../../../references/relationships.md#호스트의-의미-추출-순서)를 따른다.
+
+문서 노드의 `current`는 ID·hash·속성 대응 상태이고 문서 간 관계의 품질이나 전체 의미 완전성을 뜻하지 않는다. 관계 검토 작업 상태 `review_work_status`, 판단 내용 `judgment_summary`, 기존 호환 상태 `relation_status`를 구분한다. 현재 범위의 후보와 영향 관계를 근거로 검토하고 타당하게 보류한 경우 작업은 `complete`일 수 있어도 관계가 확정됐다는 뜻은 아니다. 구형 `relation_status`가 `partial`로 남을 수 있으며 이를 새 작업 완료 여부로 대신하지 않는다. 관련 근거가 없어 관계가 0개인 것은 가능하지만 빈 chunk만으로 의미 검토 완료라고 판단하지 않는다. 각 실행의 후보 범위·결론·미완료 이유를 구분한다. 예상한 의미 chunk가 누락되면 게시하지 않는다. 후보 탐색이나 판단이 부분적이면 검증된 범위만 다루고 미검토 후보를 관계 없음이나 삭제로 취급하지 않는다.
+
+후보 판단과 최종 활성 관계가 충돌하면 기록된 `decision_conflicts`와 관계 검토 상태를 확인한다. 충돌을 없애려고 관계를 자동 삭제하거나 판단을 자동 변경하지 않는다. 미검토 legacy edge는 갱신 시 원형을 별도 보존하며 기본 투영에서 확정 관계로 사용하지 않는다. [자료 형식과 상태 확인](../../../references/relationships.md)
+
 1. 원본 변경 성공과 관련 갱신 승인 여부를 확인한다. `active_index` 중 허용 파일만 명시 목록으로 전달한다. 과거 자료·볼트 전체 detection으로 확대하지 않는다. 원문 ID와 읽은 현재 hash를 연결한다.
 2. 현재 호스트 또는 기존 subagent 규약으로 허용 자료만 추출한다. `source_file`·`source_location`, 원문 ID/hash, `_origin: semantic`, `EXTRACTED`·`INFERRED`를 추적한다. 새 모델 호출기나 provider를 만들지 않으며 키가 존재해도 Gemini로 자동 전환하지 않는다.
 3. 모든 예상 chunk의 반환·JSON 배열·source 범위·hash·참조 endpoint를 확인한다. 누락·오류·stale·부분 추출은 중단한다. 공통 도구의 chunk skip 지침보다 불완전 결과 미교체 계약을 우선한다.
-4. 내부 `scripts/graph_ops.py`의 `refresh_graph`에 허용된 활성 원문과 검증할 chunk·예상 ID를 전달한다. 검증한 기존 그래프 snapshot과 선택 자료를 메모리에서 합쳐 기존 Graphify `build`를 `dedup=False`로 사용한다. 선택한 source의 semantic 추출분은 새 결과로 교체하되 같은 source의 AST 층과 대상 밖 node·edge·hyperedge를 보존한다. 입력에 없다는 이유로 미허용 자료를 삭제하거나 upstream의 고립 노드 정리를 자동 실행하지 않는다. 승인된 작업 위치에서 기준 그래프와 후보를 안전하게 만들고 serialize·reload해 node ID와 원문 ID, 원문 hash·aliases·tags 및 변경 대상 밖 자료를 대조한 뒤 기대 hash와 백업 조건을 적용해 게시한다. 원본 Markdown 복제·새 DB·새 설치는 하지 않는다.
+4. 내부 `scripts/graph_ops.py`의 `refresh_graph`에 허용된 활성 원문과 검증할 chunk·예상 ID를 전달한다. v1 갱신은 검증한 기존 그래프 snapshot과 선택 자료를 메모리에서 합쳐 기존 Graphify `build`를 `dedup=False`로 사용한다. v2 관계 갱신은 별도의 `relationship_request`를 전달해 허용된 비교 자료·후보 판단·관계 근거도 검사한다. 선택한 source의 semantic 추출분은 새 결과로 교체하되 같은 source의 AST 층과 대상 밖 자료를 보존한다. 입력에 없다는 이유로 미허용 자료를 삭제하거나 upstream의 고립 노드 정리를 자동 실행하지 않는다. 승인된 작업 위치에서 기준 그래프와 후보를 안전하게 만들고 serialize·reload해 node ID와 원문 ID, 원문 hash·aliases·tags 및 변경 대상 밖 자료를 대조한 뒤 기대 hash와 백업 조건을 적용해 게시한다. 원본 Markdown 복제·새 DB·새 설치는 하지 않는다.
 5. 게시 전 실패는 기존 그래프와 저장된 노트를 유지하고 관계 반영 대기를 알리며 현재 Markdown으로 답한다. 게시 후 재확인 실패는 `publication_uncertain=True`, `graph_written=None`으로 구분한다. 현재 그래프와 백업을 대조해 결과를 판단하며 확인 전 재시도하거나 무조건 교체 전 상태라고 주장하거나 자동 복구하지 않는다. 다음 관련 요청에서 [두레](../../dure/workflow.md)의 재개 조건에 따라 승인 범위·완료 및 남은 단계와 현재 원문 ID·hash를 대조한다. 조건이 일치하면 같은 범위에서 반복 승인 없이 대기 항목을 재개하고 차이가 있으면 영향 부분을 확인한다. 읽기 전용 요청이면 쓰지 않는다. 원본 저장 성공·Markdown 답변과 Graphify 준비·갱신 결과를 각각 기록한다. 조회의 `save-result`·`reflect`·어휘 파일 생성·재생성은 제외한다. watch·자동 재시도는 없다. 미허용 파일의 부재를 삭제 근거로 삼거나 `prune_sources`로 넘기지 않는다.
 
 내부 함수는 `read_active_documents(note_scope, active_path, selected_paths=None)`로 선택된 활성 노트와 목록의 현재 hash를 읽고, `graph_coverage(documents, graph_bytes)`로 노트별 `current`·`missing`·`stale`·`invalid`를 대조한다.
 
 목록 자체는 읽기 권한이 아니다. `document_nodes`는 관계가 없는 노트도 식별할 수 있는 문서 노드를 준비한다. 호스트는 허용된 자료에서 의미 chunk를 만들고 예상 chunk ID와 원문 ID·hash·출처·endpoint를 검증해 `refresh_graph`에 전달한다. Graphify가 자동으로 별칭을 추출하거나 의미를 검증한다고 가정하지 않는다.
 
-`refresh_graph(active_documents, chunks, *, expected_chunk_ids, graph_scope, graph_path, expected_graph_sha256, work_scope, baseline_path, candidate_path, backup_scope=None, backup_path=None, read_only=False)`의 `work_scope`는 이미 허용된 임시 대상이다. 기존 결과에는 기대 hash·백업을 적용한다.
+`refresh_graph(active_documents, chunks, *, expected_chunk_ids, graph_scope, graph_path, expected_graph_sha256, work_scope, baseline_path, candidate_path, backup_scope=None, backup_path=None, read_only=False, relationship_request=None)`의 `work_scope`는 이미 허용된 임시 대상이다. 기존 결과에는 기대 hash·백업을 적용한다. `relationship_request=None`은 기존 v1 처리이며, 문서 간 관계 갱신은 허용된 비교 범위와 후보·판단·근거를 포함한 요청을 명시한다. 기존 v1 자료는 이 요청만으로 자동 전환하지 않는다. 입력·반환 상태와 명시 전환·투영은 [문서 간 관계 처리](../../../references/relationships.md)를 따른다.
 
 `read_only=True`는 갱신하지 않으며 권한 인증을 대신하지 않는다. 등록에는 `register_documents`와 `registration_lifecycle`, 다음 관련 요청의 재개에는 복제하지 않는 `resume_registration`을 사용한다. 각각의 실제 결과를 확인하며 source binding과 원본 재확인도 등록 전에 수행한다.

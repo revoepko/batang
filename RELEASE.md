@@ -2,6 +2,21 @@
 
 [한국어](RELEASE.ko.md)
 
+## 0.1.1-b (in development)
+
+### Changed
+
+- Reduced the cost of checking duplicate paths in the ACTIVE list while preserving the existing path order and error handling.
+- The read-only query session provides scoped search, passage, relationship, and review-context lookups. Within the same process and model context it can refer to passages after they are received and acknowledged; a new context requires the needed evidence again. [Query guidance](skills/batang/references/query.md)
+- Routine knowledge work uses one performer with the necessary tools by default, while honoring explicit delegation and mandatory host or project roles and review. Where the host permits, an assigned planner directly manages delegated work and integrates its results. [Delegation guidance](skills/batang/references/delegation.md)
+- Relationship updates compare permitted existing documents and distinguish the type, direction, conditions and evidence of relationships between documents. The relationship review reports partial comparisons and deferred decisions.
+- When a document or its evidence changes, affected relationships are reviewed again, with independent supporting evidence kept distinct. A document node marked `current` does not mean relationship quality has been reviewed completely.
+- Accept or defer individual relationships between the same documents. A deferred existing relationship is excluded from confirmed results while its supporting history is preserved, and can be accepted again after reviewing current evidence.
+
+### Compatibility
+
+- Existing relationship data is not converted automatically. The new relationship format requires a separately approved conversion and is projected through Batang rather than passed directly to existing Graphify commands. [Relationship guidance](skills/batang/components/supul/gori/workflow.md)
+
 ## 0.1.1-a
 
 ### Changed

@@ -6,7 +6,7 @@
 
 일반 원문은 허용 범위에서 읽고, 관리 문서의 필수 정보와 지원 속성, 최초 가져오기 입력을 구분한다. 손상된 관리 ID·출처는 임의로 새로 만들지 않는다. 신규 문서는 v2, 기존 v1 수정은 v1과 ID·변경하지 않은 값을 유지한다. 읽기나 no-op 때문에 재저장·승격하지 않으며 미지원 frontmatter를 손실 변환하지 않는다.
 
-호스트는 명시 범위로 [내부 파일 도우미](../../../scripts/file_ops.py)의 `FileScope(root, explicit_relative_paths)`를 구성하고 `read(path)`의 bytes와 hash를 확보한다.
+호스트는 [고정 호출](../../../references/calls.md)로 허용 범위의 검색과 필요한 원문 구간을 선택한다. [조회 안내](../../../references/query.md)의 참조와 현재 hash를 확인하며 의미·맥락은 별도로 판단한다. 저장에 필요한 원문과 hash는 기존 `FileScope`로 확보한다.
 
 필요한 경우 `parse_document`, `new_metadata`, `serialize_document`와 `verify_quote(source_bytes, start_byte, end_byte, quote)`를 호출한다. 인용은 지정 byte 구간과 대조하고 의미·맥락도 별도로 확인한다.
 

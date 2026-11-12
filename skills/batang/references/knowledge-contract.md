@@ -30,6 +30,8 @@ v2의 source `id`·`origin`은 빈 문자열 아닌 문자열이다. `path`·`sh
 
 호스트가 **신규** metadata를 만들 때 내부 `new_metadata(subject, content_kind, sources, *, tags=..., legacy_refs=..., aliases=...)`를 사용할 수 있다. v2와 새 UUID를 만들고, `tags`·`legacy_refs` 인자를 미제공한 경우에만 빈 배열을 채운다. 명시 `null`은 거부한다. `aliases` 인자가 누락되면 key를 만들지 않고 명시 인자는 검증해 보존한다. 이 함수는 저장·승인·기존 문서 변환을 수행하지 않는다. 저장된 v1·v2는 일곱 key가 모두 있어야 하며 읽기 시 기본값을 보충하지 않는다.
 
+## 출처와 근거 판단
+
 신규 복제의 `sources[].path`는 `batang-source://<source_root_id>/<인코딩된 상대 경로>`를 사용한다. 루트 ID와 실제 위치의 `source_roots` 매핑은 로컬 프로젝트 설정에 두며 매핑은 읽기 권한이 아니다. 기존 절대 경로·v1/v2 출처는 자동 변경하지 않는다. 원문을 읽을 때는 명시 허용 목록과 [파일·출처 접근](source-access.md)을 따르며, 매핑이 없으면 추측하지 않는다.
 
 `sources[].sha256`는 원문을 관측한 당시 hash이며 현재 raw 파일 hash나 현재 지식 문서 hash가 아니다. `legacy_refs[].sha256`는 참조한 과거 파일의 확인한 hash다. stage/status/call·모델 이력은 지식의 확신 등급이 아니며 별도 신뢰도 필드를 만들지 않는다. 파일 hash·형식 검사가 의미 검토 완료를 뜻하지 않는다.

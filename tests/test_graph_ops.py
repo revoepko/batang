@@ -81,6 +81,13 @@ class GraphFixture(unittest.TestCase):
 
 
 class ScopeAndCoverage(GraphFixture):
+    def test_active_paths_preserve_order_and_reject_decoded_duplicates(self):
+        data = b"- [second](second.md)\r\n- [first](first%20name.md)\n"
+        self.assertEqual(ops._active_paths(data), ("second.md", "first name.md"))
+        duplicate = b"- [first](first.md)\n- [again](first%2Emd)\n"
+        with self.assertRaisesRegex(ops.GraphError, "active_duplicate_path"):
+            ops._active_paths(duplicate)
+
     def test_active_selection_never_reads_unlisted_or_unallowed_note(self):
         (self.vault / "outside.md").write_bytes(note("outside"))
         with self.assertRaisesRegex(ops.GraphError, "active_selection_invalid"):

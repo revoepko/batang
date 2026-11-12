@@ -96,6 +96,8 @@ It checks when the source material applies and under what conditions. If sources
 
 ## Reading and changes
 
+For a lookup, Batang can use a read-only query session over the selected, permitted notes. Within the same session and model context, it can refer back to passages already received instead of sending them again. A new context requires the relevant evidence again. See [query guidance](skills/batang/references/query.md).
+
 - Batang reads only the notes and permitted sources you select for the task.
 - It saves nothing from a conversation automatically.
 - When you ask for an update, it changes only the target you specify and makes a backup before editing an existing note.
@@ -107,6 +109,12 @@ For details, see [Reading and saving notes](skills/batang/references/source-acce
 You can also import notes written elsewhere. Batang registers copies of the selected notes and their sources, then checks the links between copies. It leaves the originals unchanged. If an attribute or link needs review, it is preserved and Batang explains why. See [import guidance](skills/batang/references/import.md).
 
 You can edit imported note content and properties in Obsidian. If Batang cannot update the relationship data after saving a note, the note remains readable and Batang reports that the update is pending.
+
+When you request a relationship update, Batang compares the note with existing notes you have allowed it to read and looks for supporting evidence. It distinguishes a shared topic from dependency or contradiction. It reports any scope it could not compare and cases it could not determine. Finding no relationship is also a possible outcome.
+
+Between the same notes, one relationship can be accepted while another is deferred. A deferred existing relationship is excluded from confirmed results while its supporting history is preserved; it can be accepted again after its current evidence is reviewed.
+
+Existing relationship data is not automatically converted to the new format. Ask Batang to show a graph of the new-format data. Updates and conversion are performed only for selected material within the approved scope.
 
 You can give notes alternative names with `aliases`. The AI uses aliases of selected notes as clues to find related content. See [relationship guidance](skills/batang/components/supul/gori/workflow.md).
 
