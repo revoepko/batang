@@ -75,7 +75,7 @@ Codex CLI와 ChatGPT 앱은 [Codex 안내](skills/batang/references/hosts/codex.
 | [`가닥`](skills/batang/components/gadak/workflow.md) | 어떤 노트와 도구를 사용할지, 프로젝트 설정이 준비됐는지 확인합니다. |
 | [`나루`](skills/batang/components/naru/workflow.md) | 요청을 보고 지식 조회, 개발, 문서 또는 도면 중 필요한 작업을 고릅니다. |
 | [`두레`](skills/batang/components/dure/workflow.md) | 변경할 수 있는 대상을 확인하고 수정 전 백업과 복구 조건을 살핍니다. |
-| [`마디`](skills/batang/components/madi/workflow.md) | 개발·문서·도면 작업을 계획하고 결과를 만든 뒤 다른 검토자가 확인하도록 합니다. |
+| [`마디`](skills/batang/components/madi/workflow.md) | 개발·문서·도면 작업을 계획하고 수행하며 적용 규약의 검토 기준을 따릅니다. |
 | [`수풀`](skills/batang/components/supul/workflow.md) | 요청에 따라 선택한 자료를 노트에 저장하고, 필요한 내용을 찾거나 정정합니다. |
 
 `갈피`, `고리`, `보기`는 수풀에 속합니다.
@@ -96,7 +96,7 @@ Codex CLI와 ChatGPT 앱은 [Codex 안내](skills/batang/references/hosts/codex.
 
 ## 노트 읽기와 변경
 
-필요한 내용을 찾을 때 선택하고 허용한 노트에 대해 읽기 전용 조회 세션을 사용할 수 있습니다. 같은 세션과 모델 문맥에서는 이미 전달받은 구간을 다시 보내지 않고 참조할 수 있습니다. 새 문맥에서는 필요한 근거를 다시 확인합니다. [조회 안내](skills/batang/references/query.md)를 참고하세요.
+필요한 내용을 찾을 때 선택하고 허용한 노트에 대해 읽기 전용 조회 세션을 사용할 수 있습니다. 같은 조회 프로세스와 모델 문맥에서는 실제로 온전히 수신하고 확인한 구간을 다시 보내지 않고 참조할 수 있습니다. 새 문맥에서는 필요한 근거를 다시 확인합니다. [조회 안내](skills/batang/references/query.md)를 참고하세요.
 
 - 지정한 노트와 허용된 출처만 읽습니다.
 - 대화 내용을 자동으로 저장하지 않습니다.

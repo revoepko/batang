@@ -75,7 +75,7 @@ Your existing AI instructions and agent roles remain unchanged.
 | [`Gadak`](skills/batang/components/gadak/workflow.md) | Checks which notes and tools to use and whether the project is ready. |
 | [`Naru`](skills/batang/components/naru/workflow.md) | Chooses the knowledge, development, document, or diagram path for your request. |
 | [`Dure`](skills/batang/components/dure/workflow.md) | Checks which files may change and the backup and recovery conditions first. |
-| [`Madi`](skills/batang/components/madi/workflow.md) | Plans and creates development, document, or diagram work, then has another reviewer check it. |
+| [`Madi`](skills/batang/components/madi/workflow.md) | Plans and carries out development, document, or diagram work and follows applicable review requirements. |
 | [`Supul`](skills/batang/components/supul/workflow.md) | On request, saves selected material to notes, finds information, and helps correct it. |
 
 `Galpi`, `Gori`, and `Bogi` are responsibilities within `Supul`.
@@ -96,7 +96,7 @@ It checks when the source material applies and under what conditions. If sources
 
 ## Reading and changes
 
-For a lookup, Batang can use a read-only query session over the selected, permitted notes. Within the same session and model context, it can refer back to passages already received instead of sending them again. A new context requires the relevant evidence again. See [query guidance](skills/batang/references/query.md).
+For a lookup, Batang can use a read-only query session over the selected, permitted notes. Within the same query process and model context, it can refer back to passages after they are fully received and acknowledged instead of sending them again. A new context requires the relevant evidence again. See [query guidance](skills/batang/references/query.md).
 
 - Batang reads only the notes and permitted sources you select for the task.
 - It saves nothing from a conversation automatically.
