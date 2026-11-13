@@ -1,6 +1,7 @@
 """조회 packet의 실제 인용·한도·권한 경계를 합성 임시 파일로 확인한다."""
 import copy
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -305,6 +306,113 @@ class SearchAndSpans(QueryFixture):
             self.assertNotIn("PRIVATE", json.dumps(packet))
             self.assertEqual({x["path"] for x in packet["items"]}, {"b.md", "c.md"})
 
+    def test_success_cursor_ignores_unselected_sibling_and_same_bytes_touch(self):
+        limits = q.QueryLimits(max_items=1)
+        for action in ("noop", "sibling", "touch"):
+            with self.subTest(action=action):
+                first = q.search(self.context, "공통", limits=limits)
+                if action == "sibling":
+                    (self.root / "unselected.md").write_text("outside selected set")
+                elif action == "touch":
+                    info = (self.root / "a.md").stat()
+                    os.utime(self.root / "a.md", ns=(info.st_atime_ns, info.st_mtime_ns + 1000000))
+                second = q.search(self.context, "공통", limits=limits, cursor=first["next_cursor"])
+                self.assertEqual(second["status"], "partial", second)
+                self.assertEqual([item["path"] for item in second["items"]], ["b.md"])
+
+    def test_success_read_ignores_metadata_changes_during_one_call(self):
+        for action in ("sibling", "touch"):
+            with self.subTest(action=action):
+                original, changed = self.scope.read, [False]
+                def read(path):
+                    value = original(path)
+                    if path == "a.md" and not changed[0]:
+                        changed[0] = True
+                        if action == "sibling":
+                            (self.root / "unselected.md").write_text("unselected sibling")
+                        else:
+                            info = (self.root / path).stat()
+                            os.utime(self.root / path, ns=(info.st_atime_ns, info.st_mtime_ns + 1000000))
+                    return value
+                with patch.object(self.scope, "read", side_effect=read):
+                    packet = q.search(self.context, "공통")
+                self.assertEqual(packet["status"], "ok", packet)
+                self.assertEqual({i["path"] for i in packet["items"]}, set(self.paths))
+                self.assertEqual(packet["omissions"], [])
+
+    def test_failure_signature_ignores_siblings_but_detects_failed_fragment_replacement(self):
+        blocked = self.root / "blocked"
+        blocked.write_bytes(b"not a directory")
+        selected = [*self.paths, "blocked/note.md"]
+        (self.root / "ACTIVE.md").write_text("".join(f"- [{p}]({p})\n" for p in selected))
+        scope = f.FileScope(str(self.root), ["ACTIVE.md", *selected])
+        context = self.ctx(selected, scope=scope)
+        limits = q.QueryLimits(max_items=1)
+        first = q.search(context, "공통", limits=limits)
+        (self.root / "unselected.md").write_text("sibling")
+        second = q.search(context, "공통", limits=limits, cursor=first["next_cursor"])
+        self.assertEqual(second["status"], "partial", second)
+        self.assertIn({"path": "blocked/note.md", "reason": "path_unavailable"}, second["omissions"])
+        replacement = self.root / "replacement"
+        replacement.write_bytes(blocked.read_bytes())
+        replacement.replace(blocked)
+        changed = q.search(context, "공통", limits=limits, cursor=second["next_cursor"])
+        self.assertEqual(changed["status"], "stale", changed)
+
+    def test_failure_replacement_after_actual_read_is_not_bound_as_old_failure(self):
+        (self.root / "a.md").write_bytes(b"invalid")
+        original, changed = self.scope.read, [False]
+        def read(path):
+            value = original(path)
+            if path == "a.md" and not changed[0]:
+                changed[0] = True
+                self.write_note("a", b"valid replacement\n")
+            return value
+        with patch.object(self.scope, "read", side_effect=read):
+            packet = q.search(self.context, "공통")
+        self.assertEqual(packet["status"], "partial", packet)
+        self.assertIn({"path": "a.md", "reason": "snapshot_changed"}, packet["omissions"])
+        self.assertNotIn({"path": "a.md", "reason": "document_invalid"}, packet["omissions"])
+
+    def test_late_reference_failure_has_observation_and_detects_after_page_touch(self):
+        good_a, good_b = self.ref("a"), self.ref("b")
+        requests = [dict(good_a, document_id="wrong"), good_b]
+        original = q._page
+        def touching(*args, **kwargs):
+            value = original(*args, **kwargs)
+            info = (self.root / "a.md").stat()
+            os.utime(self.root / "a.md", ns=(info.st_atime_ns, info.st_mtime_ns + 1000000))
+            return value
+        with patch.object(q, "_page", side_effect=touching):
+            packet = q.read_spans(self.context, requests)
+        self.assertEqual(packet["status"], "stale", packet)
+        self.assertEqual(packet["items"], [])
+
+    def test_collision_and_reference_isolation_recheck_the_success_snapshot(self):
+        original = q._isolation_observation
+        def replacing(context, path, doc):
+            (self.root / path).write_bytes(b"changed after read")
+            return original(context, path, doc)
+        refs = [dict(self.ref("a"), document_id="wrong"), self.ref("c")]
+        with patch.object(q, "_isolation_observation", side_effect=replacing):
+            self.assertEqual(q.read_spans(self.context, refs)["status"], "stale")
+        self.write_note("a", b"restored\n")
+        self.write_note("b", b"duplicate\n", batang_id="a")
+        with patch.object(q, "_isolation_observation", side_effect=replacing):
+            packet = q.search(self.context, "공통")
+        self.assertEqual(packet["status"], "stale", packet)
+        self.assertEqual(packet["items"], [])
+
+    def test_success_to_failure_and_source_bytes_change_still_invalidate_cursor(self):
+        limits = q.QueryLimits(max_items=1)
+        first = q.search(self.context, "공통", limits=limits)
+        (self.root / "a.md").write_bytes(b"invalid")
+        self.assertEqual(q.search(self.context, "공통", limits=limits, cursor=first["next_cursor"])["status"], "stale")
+        self.write_note("a", b"restored\n")
+        first = q.search(self.context, "공통", limits=limits)
+        self.write_note("b", b"different bytes\n")
+        self.assertEqual(q.search(self.context, "공통", limits=limits, cursor=first["next_cursor"])["status"], "stale")
+
     def test_failure_observation_and_success_set_changes_invalidate_cursor(self):
         (self.root / "b.md").write_bytes(b"bad")
         limits = q.QueryLimits(max_items=1)
@@ -396,6 +504,21 @@ class RawRelations(QueryFixture):
         self.assertEqual([x["record"]["relation_id"] for x in packet["items"]], [relations[1]["relation_id"]])
         self.assertIn({"path": "a.md", "reason": "document_invalid"}, packet["omissions"])
         self.assertNotIn(relations[0]["relation_id"], json.dumps(packet))
+
+    def test_missing_graph_root_and_leaf_both_report_missing_without_creation(self):
+        graph_root = self.root / "not-yet-created"
+        scope = f.FileScope(str(graph_root), ["graph.json"])
+        for state in ("root_missing", "leaf_missing"):
+            with self.subTest(state=state):
+                if state == "leaf_missing":
+                    graph_root.mkdir()
+                context = q.QueryContext(self.scope, "ACTIVE.md", self.paths,
+                                         graph_scope=scope, graph_path="graph.json")
+                packet = q.relations(context)
+                self.assertEqual(packet["status"], "absent", packet)
+                self.assertEqual(packet["graph_status"], "missing")
+                self.assertEqual(graph_root.exists(), state == "leaf_missing")
+                self.assertFalse((graph_root / "graph.json").exists())
 
     def test_graph_missing_with_document_failure_is_partial_and_graph_error_is_global(self):
         (self.root / "a.md").write_bytes(b"broken")

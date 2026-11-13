@@ -146,7 +146,8 @@ def _observation(scope, path):
     """허용 상대 경로만 no-follow로 관찰한다. 상세 identity는 출력하지 않는다."""
     try:
         with scope._parent(path) as (parent, name):
-            owner = _stat_signature(os.fstat(parent))
+            held = os.fstat(parent)
+            owner = (held.st_dev, held.st_ino)
             try:
                 leaf = _stat_signature(os.stat(name, dir_fd=parent, follow_symlinks=False))
             except FileNotFoundError:
@@ -188,11 +189,21 @@ def _collect(context, paths, *, retain_body=True):
         else:
             reason = None
         after = _observation(context.note_scope, path)
-        observations[path] = after
-        if before != after:
-            failures[path] = "snapshot_changed"
-        elif reason is not None:
+        if reason is None and before != after:
+            # 성공 문서의 touch·형제 변경은 내용 변경이 아니다. 실제 bytes로 확인한다.
+            try:
+                changed = context.note_scope.read(path).sha256 != doc.sha256
+            except (FileError, OSError, UnicodeError) as exc:
+                _document_reason(exc)  # root·불명 오류는 전역 오류로 유지한다.
+                changed = True
+            if changed:
+                reason = "snapshot_changed"
+                after = _observation(context.note_scope, path)
+        elif reason is not None and before != after:
+            reason = "snapshot_changed"
+        if reason is not None:
             failures[path] = reason
+            observations[path] = after
         else:
             docs[path] = (doc if retain_body else
                           g.Document(doc.scope, doc.path, doc.sha256, doc.metadata, b""))
@@ -202,31 +213,46 @@ def _collect(context, paths, *, retain_body=True):
     for paths in groups.values():
         if len(paths) > 1:
             for path in paths:
+                observations[path] = _isolation_observation(context, path, docs[path])
                 failures[path] = "document_collision"
                 del docs[path]
     return docs, failures, observations
 
 
+def _isolation_observation(context, path, doc):
+    """성공 후 충돌·참조 오류로 격리할 때 실제 읽기와 실패 서명을 결합한다."""
+    before = _observation(context.note_scope, path)
+    try:
+        current = context.note_scope.read(path).sha256
+    except (FileError, OSError, UnicodeError):
+        raise ConflictError("query_source_changed") from None
+    after = _observation(context.note_scope, path)
+    if before != after or current != doc.sha256:
+        raise ConflictError("query_source_changed")
+    return after
+
+
 def _verify(context, active_hash, docs, failures, observations):
     if context.note_scope.read(context.active_path).sha256 != active_hash:
         raise ConflictError("query_active_changed")
-    for path, expected in observations.items():
-        if _observation(context.note_scope, path) != expected:
+    for path in failures:
+        if _observation(context.note_scope, path) != observations[path]:
             raise ConflictError("query_source_changed")
-        if path in docs:
-            try:
-                current = context.note_scope.read(path).sha256
-            except (FileError, OSError, UnicodeError):
-                raise ConflictError("query_source_changed") from None
-            if current != docs[path].sha256:
-                raise ConflictError("query_source_changed")
+    for path, doc in docs.items():
+        try:
+            current = context.note_scope.read(path).sha256
+        except (FileError, OSError, UnicodeError):
+            raise ConflictError("query_source_changed") from None
+        if current != doc.sha256:
+            raise ConflictError("query_source_changed")
 
 
 def _identity(context, active_hash, hashes, query, graph_hash=None, failures=None, observations=None):
     value = [context.note_scope.root_parts, sorted(context.note_scope.allowed),
              context.active_path, active_hash, sorted(context.selected_paths), hashes,
              query, graph_hash, sorted((failures or {}).items()),
-             sorted((observations or {}).items())]
+             sorted((path, signature) for path, signature in (observations or {}).items()
+                    if path in (failures or {}))]
     if context.graph_scope is not None:
         value.extend([context.graph_scope.root_parts, sorted(context.graph_scope.allowed),
                       context.graph_path])
@@ -447,8 +473,10 @@ def read_spans(context, requests, *, limits=None, cursor=None):
             a, b = _request_range(docs[path], request)
             ranges.append((path, a, b))
         except ConflictError as exc:
+            observations[path] = _isolation_observation(context, path, docs[path])
             failures[path] = "reference_invalid" if exc.code == "query_span_changed" else "snapshot_changed"
         except (FileError, UnicodeError):
+            observations[path] = _isolation_observation(context, path, docs[path])
             failures[path] = "reference_invalid"
     items = [item for path, a, b in ranges if path not in failures
              for item in _spans(context, docs[path], a, b, limits)]

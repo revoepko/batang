@@ -81,6 +81,15 @@ class GraphFixture(unittest.TestCase):
 
 
 class ScopeAndCoverage(GraphFixture):
+    def test_optional_read_missing_root_and_leaf_return_none_without_creation(self):
+        missing = self.root / "missing-graph-root"
+        scope = files.FileScope(str(missing), ["graph.json"])
+        self.assertIsNone(ops._optional_read(scope, "graph.json"))
+        self.assertFalse(missing.exists())
+        missing.mkdir()
+        self.assertIsNone(ops._optional_read(scope, "graph.json"))
+        self.assertFalse((missing / "graph.json").exists())
+
     def test_active_paths_preserve_order_and_reject_decoded_duplicates(self):
         data = b"- [second](second.md)\r\n- [first](first%20name.md)\n"
         self.assertEqual(ops._active_paths(data), ("second.md", "first name.md"))

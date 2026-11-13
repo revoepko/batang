@@ -328,15 +328,27 @@ class Files(unittest.TestCase):
         self.assertIsNone(caught.exception.path_signature)
         self.assertNotIn(str(alias), str(caught.exception))
 
-    def test_root_missing_and_non_directory_are_global_when_used(self):
-        for root in (self.root / "missing", self.target / "nested"):
-            # 생성이나 세션 open에 새 root preflight를 추가하지 않는다.
-            scope = ops.FileScope(root, ["a.md"])
-            with self.subTest(root=root), self.assertRaises(ops.FileError) as caught:
-                scope.read("a.md")
-            self.assertEqual(caught.exception.scope_location, "root")
-            self.assertEqual(caught.exception.code, "path_unavailable")
-            self.assertNotIn(str(root), str(caught.exception))
+    def test_root_missing_stays_file_not_found_without_creating_directories(self):
+        root = self.root / "missing"
+        scope = ops.FileScope(root, ["a.md"])
+        for operation in (lambda: scope.read("a.md"), lambda: scope.write("a.md", b"new")):
+            with self.assertRaises(FileNotFoundError):
+                operation()
+            self.assertFalse(root.exists())
+
+    def test_root_non_directory_and_permission_remain_global_when_used(self):
+        root = self.target / "nested"
+        scope = ops.FileScope(root, ["a.md"])
+        with self.assertRaises(ops.FileError) as caught:
+            scope.read("a.md")
+        self.assertEqual(caught.exception.scope_location, "root")
+        self.assertEqual(caught.exception.code, "path_unavailable")
+        self.assertNotIn(str(root), str(caught.exception))
+        with patch.object(ops, "_open_dir", side_effect=PermissionError("private")), \
+             self.assertRaises(ops.FileError) as caught:
+            self.scope.read("Knowledge/a.md")
+        self.assertEqual(caught.exception.scope_location, "root")
+        self.assertNotIn("private", str(caught.exception))
 
     def test_internal_non_directory_observation_is_not_symlink_claim(self):
         scope = ops.FileScope(self.root, ["Knowledge/a.md/child.md"])

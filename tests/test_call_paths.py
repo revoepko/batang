@@ -171,6 +171,22 @@ class ReviewPreparation(QueryFixture):
         self.assertEqual(packet["status"], "ok", packet)
         self.assertTrue(packet["items"])
 
+    def test_post_review_accepts_missing_graph_root_or_leaf_without_creating_them(self):
+        graph_root = self.root / "new-graph-root"
+        graph_scope = f.FileScope(str(graph_root), ["graph.json"])
+        for state in ("root_missing", "leaf_missing"):
+            with self.subTest(state=state):
+                if state == "leaf_missing":
+                    graph_root.mkdir()
+                context = q.QueryContext(self.scope, "ACTIVE.md", self.paths,
+                                         graph_scope=graph_scope, graph_path="graph.json")
+                packet = q.prepare_review_context(context, stage="post_registration",
+                                                  target_paths=["a.md"], comparison_paths=["b.md"])
+                self.assertEqual(packet["status"], "ok", packet)
+                self.assertEqual(packet["graph_status"], "missing")
+                self.assertEqual(graph_root.exists(), state == "leaf_missing")
+                self.assertFalse((graph_root / "graph.json").exists())
+
     def test_partial_targets_preserve_normal_content_without_candidate_synthesis(self):
         self.save_graph(relations=[self.relation("b", "c", ("b", "c"))])
         (self.root / "a.md").write_bytes(b"broken")

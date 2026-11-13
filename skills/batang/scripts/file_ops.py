@@ -769,7 +769,7 @@ def _path_failure(parent, name, remaining, location):
                 info.st_mtime_ns, info.st_ctime_ns)
     return FileError("path_unavailable", scope_location="internal",
                      path_observation=observation,
-                     path_signature=(signature(held), signature(observed), tuple(remaining)))
+                     path_signature=((held.st_dev, held.st_ino), signature(observed), tuple(remaining)))
 
 
 def _open_leaf(parent, name, flags):
@@ -1010,6 +1010,8 @@ class FileScope:
                     following = _open_dir(component, fd)
                     os.close(fd)
                     fd = following
+            except FileNotFoundError:
+                raise
             except OSError:
                 raise FileError("path_unavailable", scope_location="root") from None
             for index, component in enumerate(parts[:-1]):
