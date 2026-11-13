@@ -2,7 +2,7 @@
 
 [한국어](RELEASE.ko.md)
 
-## 0.1.1-c (Unreleased)
+## 0.1.1-c
 
 ### Changed
 
