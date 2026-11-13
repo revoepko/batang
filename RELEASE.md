@@ -2,6 +2,15 @@
 
 [한국어](RELEASE.ko.md)
 
+## 0.1.1-c (Unreleased)
+
+### Changed
+
+- Compare common link spellings within the permitted document scope when finding relationship candidates. Ambiguous names remain unresolved, and document identifiers are matched at their boundaries.
+- Clarified how to select the candidate review scope and assess narrow claims, their conditions, and supporting evidence. Candidate signals do not by themselves confirm a relationship.
+- Clarified how to use relationship record references and source passages to check evidence, including distinct supporting alternatives. [Query guidance](skills/batang/references/query.md)
+- Ordinary relationship and evidence reviews do not automatically generate HTML. An existing HTML file is reviewed as specified; visualizations are prepared when requested.
+
 ## 0.1.1-b
 
 ### Changed

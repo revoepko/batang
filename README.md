@@ -112,6 +112,8 @@ You can edit imported note content and properties in Obsidian. If Batang cannot 
 
 When you request a relationship update, Batang compares the note with existing notes you have allowed it to read and looks for supporting evidence. It distinguishes a shared topic from dependency or contradiction. It reports any scope it could not compare and cases it could not determine. Finding no relationship is also a possible outcome.
 
+Link spellings help find candidates; they do not by themselves confirm a relationship. Ordinary relationship and evidence reviews do not automatically create HTML. Request a visualization when you need one.
+
 Between the same notes, one relationship can be accepted while another is deferred. A deferred existing relationship is excluded from confirmed results while its supporting history is preserved; it can be accepted again after its current evidence is reviewed.
 
 Existing relationship data is not automatically converted to the new format. Ask Batang to show a graph of the new-format data. Updates and conversion are performed only for selected material within the approved scope.

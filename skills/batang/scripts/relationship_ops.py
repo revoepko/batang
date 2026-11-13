@@ -768,9 +768,102 @@ def _candidate_features(doc):
     return {"terms": terms, "body": body,
             "names": {doc.document_id, doc.path, doc.path.rsplit("/", 1)[-1].removesuffix(".md"),
                       doc.metadata["subject"], *doc.metadata.get("aliases", [])},
-            "refs": set(re.findall(r"\[\[([^\]|#]+)", body))
-                    | {unquote(x) for x in re.findall(r"\]\(([^)#]+)", body)},
+            "refs": _link_destinations(body),
             "words": {w.casefold() for w in re.findall(r"[^\W_]+", body) if len(w) > 2}}
+
+
+def _link_destinations(body):
+    """위키와 inline Markdown 링크의 목적지만 추출한다. 파일을 읽지 않는다."""
+    refs = {(value, "wiki") for value in re.findall(r"\[\[([^\]\n|]+)(?:\|[^\]\n]*)?\]\]", body)}
+    for match in re.finditer(r"\]\(\s*", body):
+        start = match.end()
+        if start < len(body) and body[start] == "<":
+            end = body.find(">", start + 1)
+            if end != -1 and _markdown_link_end(body, end + 1):
+                refs.add((body[start + 1:end], "markdown"))
+            continue
+        # 괄호가 포함된 파일명과 backslash escape를 보존하되 title은 제외한다.
+        depth, escaped, end = 0, False, start
+        while end < len(body):
+            char = body[end]
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                if not depth:
+                    break
+                depth -= 1
+            elif char.isspace() and not depth:
+                break
+            end += 1
+        if end > start and _markdown_link_end(body, end):
+            refs.add((body[start:end], "markdown"))
+    return refs
+
+
+def _markdown_link_end(body, start):
+    return re.compile(r'''\s*(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\))?\s*\)''').match(body, start) is not None
+
+
+def _reference_name(value):
+    return unicodedata.normalize("NFC", value)
+
+
+def _reference_index(docs, features):
+    paths, names = {}, {}
+    for identifier, doc in docs.items():
+        paths.setdefault(_reference_name(doc.path), set()).add(identifier)
+        for name in features[identifier]["names"]:
+            names.setdefault(_reference_name(name), set()).add(identifier)
+        basename = doc.path.rsplit("/", 1)[-1]
+        names.setdefault(_reference_name(basename), set()).add(identifier)
+    return paths, names
+
+
+def _reference_target(raw, syntax, source_path, paths, names):
+    # fragment은 URL decode 전에 분리하여 파일명의 %23과 앵커를 혼동하지 않는다.
+    try:
+        value = unquote(raw.split("#", 1)[0], errors="strict")
+    except (UnicodeError, ValueError):
+        return None
+    value = _reference_name(re.sub(r"\\([\\() ])", r"\1", value.strip()))
+    if (not value or value.startswith("/") or "\\" in value or "?" in value
+            or any(ord(char) < 32 for char in value)):
+        return None
+    # Markdown의 목적지는 URI 문법을 따르지만 위키 이름의 콜론은 제목 문자일
+    # 수 있다. 위키도 명시적인 외부 URL을 내부 이름으로 재해석하지 않는다.
+    scheme = r"^[A-Za-z][A-Za-z0-9+.-]*:"
+    if re.match(scheme + (r"//" if syntax == "wiki" else ""), value):
+        return None
+    root_wiki_path = syntax == "wiki" and "/" in value and not value.startswith(("./", "../"))
+    components = [] if root_wiki_path else _reference_name(source_path).split("/")[:-1]
+    for part in value.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not components:
+                return None
+            components.pop()
+        else:
+            components.append(part)
+    if syntax == "wiki" and value in names:
+        named = names[value]
+        return next(iter(named)) if len(named) == 1 else None
+    relative = _reference_name("/".join(components))
+    variants = [relative] if relative.lower().endswith(".md") else [relative, relative + ".md"]
+    found = set().union(*(paths.get(path, set()) for path in variants))
+    if found:
+        return next(iter(found)) if len(found) == 1 else None
+    # 명시된 경로가 없으면 다른 폴더의 동명 파일로 재해석하지 않는다.
+    if "/" in value or (syntax == "markdown" and value.lower().endswith(".md")):
+        return None
+    found = names.get(value, set())
+    if not found and value.lower().endswith(".md"):
+        found = names.get(value[:-3], set())
+    return next(iter(found)) if len(found) == 1 else None
 
 
 def discover_candidates(targets, comparisons=None, envelope=None):
@@ -783,17 +876,19 @@ def discover_candidates(targets, comparisons=None, envelope=None):
     target_ids = {d.document_id for d in targets.documents}
     old = None if envelope is None else parse_envelope(envelope)
     pairs = {}
-    features = {}
+    features = {identifier: _candidate_features(doc) for identifier, doc in docs.items()} if target_ids and len(docs) > 1 else {}
+    paths, names = _reference_index(docs, features) if features else ({}, {})
+    references = {identifier: {target for raw, syntax in feature["refs"]
+                              if (target := _reference_target(raw, syntax, docs[identifier].path, paths, names))}
+                  for identifier, feature in features.items()}
     for a, b in _target_pairs(docs, target_ids):
-        for identifier in (a, b):
-            if identifier not in features:
-                features[identifier] = _candidate_features(docs[identifier])
         fa, fb = features[a], features[b]
         signals = []
         if fa["terms"] & fb["terms"]:
             signals.append("metadata_terms")
-        if (fa["refs"] & fb["names"] or fb["refs"] & fa["names"]
-                or b in fa["body"] or a in fb["body"]):
+        if (b in references[a] or a in references[b]
+                or re.search(r"(?<![A-Za-z0-9_-])" + re.escape(b) + r"(?![A-Za-z0-9_-])", fa["body"])
+                or re.search(r"(?<![A-Za-z0-9_-])" + re.escape(a) + r"(?![A-Za-z0-9_-])", fb["body"])):
             signals.append("explicit_reference")
         if fa["words"] & fb["words"]:
             signals.append("body_terms")

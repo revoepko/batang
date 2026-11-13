@@ -110,3 +110,5 @@ summary = {name: getattr(result, name) for name in (
 ```
 
 이 요약은 의미 검토를 대신하지 않는다. 새 근거가 부족하면 필요한 구간만 조회한다. 기존 v1 graph를 읽기 위해 v2로 전환하지 않으며 migration·운영 전환·설치는 별도 작업이다.
+
+관계 상세 확인에는 먼저 허용 범위에서 원 기록의 `record_ref`를 확인하고 문서 ID·경로와 현재 hash를 대조한 뒤 필요한 본문 구간을 `read_spans`로 조회한다. `record_ref`와 `scope_sha256`은 원문 접근 권한이나 fetch 토큰이 아니다. 본문 1부터 시작하는 줄과 frontmatter를 포함한 파일 행은 구분한다. `ack`는 실제 모델 수신 확인이며 UI 클릭이나 열람 승인이 아니다.

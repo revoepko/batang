@@ -37,3 +37,11 @@ Graphify의 최초 생성과 갱신은 허용된 활성 원문과 기존 라이�
 `refresh_graph(active_documents, chunks, *, expected_chunk_ids, graph_scope, graph_path, expected_graph_sha256, work_scope, baseline_path, candidate_path, backup_scope=None, backup_path=None, read_only=False, relationship_request=None)`의 `work_scope`는 이미 허용된 임시 대상이다. 기존 결과에는 기대 hash·백업을 적용한다. `relationship_request=None`은 기존 v1 처리이며, 문서 간 관계 갱신은 허용된 비교 범위와 후보·판단·근거를 포함한 요청을 명시한다. 기존 v1 자료는 이 요청만으로 자동 전환하지 않는다. 입력·반환 상태와 명시 전환·투영은 [문서 간 관계 처리](../../../references/relationships.md)를 따른다.
 
 `read_only=True`는 갱신하지 않으며 권한 인증을 대신하지 않는다. 등록에는 `register_documents`와 `registration_lifecycle`, 다음 관련 요청의 재개에는 복제하지 않는 `resume_registration`을 사용한다. 각각의 실제 결과를 확인하며 source binding과 원본 재확인도 등록 전에 수행한다.
+
+### 범용 관계 후보
+
+도구는 허용된 선택 문서와 기존 영향 관계에서 후보·경로·hash·구간과 증분 범위를 준비하고, 모델은 실제 주장과 근거, 종류·방향·조건을 판단한다. 필요한 관련 구간만 넓히며 전체 graph나 모든 본문을 매번 반복 전달하지 않는다. 일반 링크는 허용 범위 안에서 상대 경로·확장자·anchor·percent 인코딩과 Unicode 표기를 대조하고 동명 대상이 모호하면 확정하지 않는다. 태그 일치로 이를 우회하지 않는다.
+
+양쪽 원문에서 실제 근거를 찾되, 명시 링크만 뒷받침하는 `references`에 존재하지 않는 target 절이나 의존을 꾸미지 않는다. `no_relation`은 실제 검토한 관계 종류의 범위에만 적용한다. 범위 밖을 자동으로 `deferred`로 만들지 않으며 실제 모호함·누락은 숨기지 않는다.
+
+`shares_topic`은 기존 대칭 관계다. 공통 주제 판단에서 동명 다의를 구분하고 실제 근거를 확인한다. A와 B, B와 C가 관련됐다는 이유만으로 A와 C 또는 동일 주제를 확정하지 않는다. 관계 판단을 태그에 자동 기록하지 않으며 대칭 관계와 방향성 참조·의존·지지를 구분한다.
