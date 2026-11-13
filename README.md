@@ -77,7 +77,7 @@ Batang answers from the notes you chose. If sources conflict or it cannot confir
 ## Troubleshooting
 
 - **What I'm looking for doesn't show up.** Check that the note is in the note list, chosen for this search, and permitted for reading. Regular note search does not automatically look beyond that scope.
-- **Search ends with an error.** If any note chosen for the search does not meet Batang's format, the whole search can end with an error. The error alone does not tell you which note, so ask the AI to find the cause and the affected note.
+- **Some search results are missing.** When selected notes have format or access problems, the result may include the confirmed failed paths and reasons alongside valid results. A partial result does not mean the search is complete or that nothing was found, so review the omissions with your AI. A global scope or active-list error may not reveal a path.
   An ordinary Markdown note in a supported format can be imported as a copy, but importing does not automatically repair damaged Batang properties. To search without that note, leave it out of this search.
 
 For details, see the [query guide](skills/batang/references/query.md), [reading and saving notes](skills/batang/references/source-access.md), and the [relationship guide](skills/batang/components/supul/gori/workflow.md). Internal components and procedures are described in the [skill guide](skills/batang/SKILL.md).

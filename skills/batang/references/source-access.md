@@ -13,6 +13,7 @@
 `scripts/file_ops.py`는 표준 라이브러리만 쓰는 내부 함수 모음이다. 공개 CLI·서비스는 없다. 현재 프로젝트나 호스트 설정에서 확인한 `knowledge_root`와 현재 승인된 **개별 상대 파일 목록**으로 `FileScope(root, explicit_relative_paths, *, cleanup_guard=None, staging_root=None)`를 만든다. 참조 path도 현재 허용 범위인지 별도 확인한다. 변경 manifest가 접근 허용 목록을 대신하지 않는다.
 
 - root는 절대 경로, 파일은 정규 상대 경로다. `..`·`.`·절대 파일 경로·빈 구성요소·symlink를 거부한다. root 조상부터 directory fd와 `O_NOFOLLOW`로 연다. 지식 root의 대상 부모 폴더를 자동 생성하거나 전체 스캔하지 않는다. 쓰기에는 전용 임시 디렉터리를 생성하고 정리 시 그 디렉터리의 내용과 빈 상태를 확인한다.
+- root 설정에서 입력과 실제 경로가 다르면 승인된 설정 작업에서 두 경로를 보여 주고 승인된 실제 경로를 저장한다. 실행 중 자동으로 링크를 따라가거나 root를 정규화하지 않는다. root 구간·내부 부모·파일 말단에서 생긴 오류의 원인이 불명확하거나 경합하면 일반 경로 오류를 유지하고 범위 밖 대상은 노출하지 않는다. 경로 문자열만으로 외부 디렉터리 교체·이동을 차단한다고 보장하지 않는다.
 - `read(path)`는 일반 파일의 `Snapshot(data, sha256, mode)`를 반환한다. 읽기 중 identity·크기·mtime·ctime 변경을 발견하면 중단한다.
 
 신규 출처의 `batang-source://`는 로컬 root 식별자와 인코딩된 상대 경로를 나타내며 네트워크 주소가 아니다. 로컬 `source_roots` 매핑은 경로 해석만 돕는다. URI의 경로 이탈·인코딩된 구분자·query·fragment·userinfo·port는 거부하고, 실제 파일 읽기는 별도의 명시 `FileScope` 허용 목록에서만 한다.

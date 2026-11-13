@@ -1,5 +1,6 @@
 """등록 전 준비와 실제 등록 후 기존 v1/v2 수명주기 연결을 합성 검증한다."""
 import json
+import io
 from pathlib import Path
 import re
 import subprocess
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_query_ops import QueryFixture, q, f, g, r
+import query_session as session
 from test_graph_ops import GraphFixture, chunks_for, GRAPHIFY, note
 
 
@@ -51,7 +53,7 @@ class QuerySessionTransport(QueryFixture):
             if stream is not None and not stream.closed:
                 stream.close()
 
-    def test_pipe_session_dispatches_reads_and_confirms_only_acknowledged_output(self):
+    def test_pipe_session_dispatches_repeated_reads_without_ack(self):
         self.save_graph(relations=[self.relation()])
         process = self.start_session()
 
@@ -77,12 +79,14 @@ class QuerySessionTransport(QueryFixture):
         self.assertEqual(read_reply["response_id"], 2)
         self.assertEqual(read_reply["result"]["items"][0]["spans"][0]["text"], "첫 줄 a\n")
         self.assertEqual(send(json.dumps({"op": "ack", "response_id": 2})),
-                         {"status": "acknowledged"})
+                         {"status": "error", "code": "unsupported_operation"})
 
         reread = send(json.dumps({"op": "read_spans", "args": {"requests": [reference]}}))
         self.assertEqual(reread["response_id"], 3)
-        self.assertTrue(reread["result"]["items"][0]["already_seen"])
-        self.assertEqual(reread["result"]["items"][0]["spans"], [])
+        self.assertEqual(reread["result"]["items"][0]["spans"][0]["text"], "첫 줄 a\n")
+        self.assertNotIn("already_seen", reread["result"]["items"][0])
+        self.assertEqual(send(json.dumps({"op": "search", "args": {"query": "첫", "seen_refs": []}})),
+                         {"status": "error", "code": "unsupported_argument"})
         relations = send(json.dumps({"op": "relations"}))
         self.assertEqual(relations["response_id"], 4)
         self.assertEqual(relations["result"]["status"], "ok")
@@ -90,14 +94,60 @@ class QuerySessionTransport(QueryFixture):
             "stage": "pre_registration", "source_paths": ["a.md"]}}))
         self.assertEqual(prepared["response_id"], 5)
         self.assertEqual(prepared["result"]["status"], "ok")
-        self.assertEqual(send('{"op":"reset_context"}'), {"status": "context_reset"})
+        self.assertEqual(send('{"op":"reset_context"}'), {"status": "error", "code": "unsupported_operation"})
         fresh = send(json.dumps({"op": "search", "args": {"query": "첫 줄 a", "fields": ["body"]}}))
         self.assertEqual(fresh["response_id"], 6)
         self.assertTrue(fresh["result"]["items"][0]["spans"])
+        self.assertEqual(send(json.dumps({"op": "open", "config": config})), {"status": "opened"})
+        reopened = send(json.dumps({"op": "read_spans", "args": {"requests": [reference]}}))
+        self.assertEqual(reopened["response_id"], 7)
+        new_ref = reopened["result"]["items"][0]["spans"][0]["ref"]
+        self.assertNotEqual(new_ref["context_id"], reference["context_id"])
+        self.assertEqual(reopened["result"]["items"][0]["spans"][0]["text"], "첫 줄 a\n")
         self.assertEqual(send('{"op":"close"}'), {"status": "closed"})
         process.stdin.close()
         self.assertEqual(process.wait(timeout=5), 0)
         self.assertEqual(process.stderr.read(), "")
+
+    def test_removed_operations_and_internal_type_errors_are_distinct(self):
+        config = {"root": str(self.root), "active_path": "ACTIVE.md", "selected_paths": ["a.md"]}
+        requests = [{"op": "ack"}, {"op": "reset_context"}, {"op": "open", "config": config},
+                    {"op": "search", "args": {"query": "a"}}, {"op": "close"}]
+        incoming = io.TextIOWrapper(io.BytesIO(("\n".join(json.dumps(x) for x in requests) + "\n").encode()))
+        output = io.StringIO()
+        with patch.object(sys, "stdin", incoming), patch.object(sys, "stdout", output), \
+             patch.object(session, "search", side_effect=TypeError("PRIVATE implementation details")):
+            session.main()
+        replies = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(replies[1:3], [{"status": "error", "code": "unsupported_operation"}] * 2)
+        self.assertEqual(replies[4], {"status": "error", "code": "invalid_or_unavailable"})
+        self.assertNotIn("PRIVATE", output.getvalue())
+
+    def test_session_partial_packets_repeat_omissions_with_total_byte_budget(self):
+        (self.root / "b.md").write_bytes(b"broken")
+        process = self.start_session()
+        self.assertEqual(json.loads(process.stdout.readline()), {"status": "ready"})
+        def send(request):
+            process.stdin.write(json.dumps(request) + "\n")
+            process.stdin.flush()
+            raw = process.stdout.readline()
+            self.assertLessEqual(len(raw.rstrip("\n").encode()), 2200)
+            return json.loads(raw)
+        config = {"root": str(self.root), "active_path": "ACTIVE.md", "selected_paths": list(self.paths)}
+        send({"op": "open", "config": config})
+        cursor, replies = None, []
+        while True:
+            reply = send({"op": "search", "args": {"query": "공통", "cursor": cursor},
+                          "limits": {"max_items": 1, "max_bytes": 2200}})
+            packet = reply["result"]
+            self.assertEqual(packet["status"], "partial", packet)
+            self.assertIn({"path": "b.md", "reason": "document_invalid"}, packet["omissions"])
+            replies.append(packet)
+            cursor = packet["next_cursor"]
+            if cursor is None:
+                break
+        self.assertEqual(len(replies), 2)
+        send({"op": "close"})
 
     def test_pipe_session_rejects_oversized_request_frame(self):
         process = self.start_session()
@@ -109,6 +159,31 @@ class QuerySessionTransport(QueryFixture):
 
 
 class ReviewPreparation(QueryFixture):
+    def test_pre_registration_does_not_preflight_unrelated_knowledge_root(self):
+        alias = self.root.parent / (self.root.name + "-alias")
+        alias.symlink_to(self.root, target_is_directory=True)
+        self.addCleanup(alias.unlink)
+        context = self.ctx(scope=f.FileScope(str(alias), ["ACTIVE.md", *self.paths]))
+        (self.root / "new.txt").write_text("explicit source\n")
+        source = f.FileScope(str(self.root), ["new.txt"])
+        packet = q.prepare_review_context(context, stage="pre_registration", source_scope=source,
+                                          source_paths=["new.txt"])
+        self.assertEqual(packet["status"], "ok", packet)
+        self.assertTrue(packet["items"])
+
+    def test_partial_targets_preserve_normal_content_without_candidate_synthesis(self):
+        self.save_graph(relations=[self.relation("b", "c", ("b", "c"))])
+        (self.root / "a.md").write_bytes(b"broken")
+        with patch.object(r, "discover_candidates", side_effect=AssertionError("incomplete selection")):
+            packet = q.prepare_review_context(self.context, stage="post_registration", target_paths=["a.md"],
+                                              comparison_paths=["b.md", "c.md"], limits=q.QueryLimits(max_items=100))
+        self.assertEqual(packet["status"], "partial", packet)
+        self.assertEqual(packet["candidate_discovery"], "not_run")
+        self.assertEqual(packet["review_completion"], "not_assessed")
+        self.assertIn({"path": "a.md", "reason": "document_invalid"}, packet["omissions"])
+        self.assertEqual({i["ref"]["path"] for i in packet["items"] if i["type"] == "document_content"}, {"b.md", "c.md"})
+        self.assertFalse(any(i["type"] == "additional_candidate" for i in packet["items"]))
+
     def test_authorized_existing_and_deferred_signals_remain_available(self):
         relation = self.relation()
         value = self.save_graph(relations=[relation])
@@ -175,16 +250,15 @@ class ReviewPreparation(QueryFixture):
         self.assertNotIn("c.md", json.dumps(packet, ensure_ascii=False))
         self.assertNotIn("review_id", judgments[0])
 
-    def test_acknowledged_raw_relation_is_not_repeated_by_review_preparation(self):
+    def test_raw_relation_is_repeated_by_review_preparation(self):
         self.save_graph(relations=[self.relation()])
         context = self.ctx()
         first = q.relations(context)
-        context.confirm_seen([i["record_ref"] for i in first["items"]])
         packet = q.prepare_review_context(context, stage="post_registration", target_paths=["a.md"],
                                           comparison_paths=["b.md"], limits=q.QueryLimits(max_items=100))
         records = [i for i in packet["items"] if i["type"] == "existing_record"]
-        self.assertTrue(records[0]["already_seen"], records)
-        self.assertNotIn("record", records[0])
+        self.assertEqual(records[0]["record"], first["items"][0]["record"])
+        self.assertNotIn("already_seen", records[0])
 
     def test_pre_registration_reads_only_explicit_source_without_active_or_write(self):
         (self.root / "new.txt").write_text("새 source\n아직 등록 안 됨\n")
@@ -213,21 +287,17 @@ class ReviewPreparation(QueryFixture):
         self.assertEqual(denied["status"], "error")
         self.assertNotIn("a.md", json.dumps(denied))
 
-    def test_source_ack_uses_context_scope_hash_and_only_sends_unseen_bytes(self):
+    def test_source_repeats_bytes_with_context_scope_and_hash_references(self):
         (self.root / "new.txt").write_text("새 source 본문\n")
         scope = f.FileScope(str(self.root), ["new.txt"])
         context = self.ctx()
         first = q.prepare_review_context(context, stage="pre_registration", source_scope=scope,
                                          source_paths=["new.txt"], limits=q.QueryLimits(max_excerpt_bytes=9))
         self.assertTrue(self.output_refs(first))
-        context.confirm_seen(self.output_refs(first))
         repeat = q.prepare_review_context(context, stage="pre_registration", source_scope=scope,
                                           source_paths=["new.txt"], limits=q.QueryLimits(max_excerpt_bytes=9))
-        self.assertTrue(all(not i["spans"] for i in repeat["items"]))
-        new_context = self.ctx(context_id="reset")
-        fresh = q.prepare_review_context(new_context, stage="pre_registration", source_scope=scope,
-                                         source_paths=["new.txt"], seen_refs=self.output_refs(first))
-        self.assertTrue(self.output_refs(fresh))
+        self.assertEqual(first, repeat)
+        self.assertNotIn("already_seen", json.dumps(first))
         (self.root / "new.txt").write_text("새 source 변경\n")
         changed = q.prepare_review_context(context, stage="pre_registration", source_scope=scope,
                                            source_paths=["new.txt"])

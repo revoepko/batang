@@ -4,11 +4,11 @@
 
 ## 조회 프로세스
 
-호스트는 같은 고정본의 `scripts` 디렉터리에서 `python -B -u <scripts>/query_session.py`를 실행하고 JSON Lines를 stdin으로 보낸다. 각 요청은 한 줄의 JSON이고 응답은 한 줄의 JSON이다. 실행기는 자기 디렉터리에서 `file_ops`와 `query_ops`를 가져온다. 입력·출력 한도는 각각 1 MiB이며 중복 키 JSON은 거부한다. 파이프 입력과 터미널 입력을 받으며, 터미널에서는 echo와 canonical 입력을 끈다. 같은 프로세스 안에만 일시적인 `QueryContext`와 전달 이력을 유지하고 `close` 또는 EOF에서 종료한다. 백그라운드 재시작·연결 복구·영속 상태는 없다. 호스트가 세션 유지 기능을 제공하지 않으면 단발 호출과 명시 참조 전달을 사용하고, 프로세스 간 자동 중복 제거가 있다고 보고하지 않는다.
+호스트는 같은 고정본의 `scripts` 디렉터리에서 `python -B -u <scripts>/query_session.py`를 실행하고 JSON Lines를 stdin으로 보낸다. 각 요청은 한 줄의 JSON이고 응답은 한 줄의 JSON이다. 실행기는 자기 디렉터리에서 `file_ops`와 `query_ops`를 가져온다. 입력·출력 한도는 각각 1 MiB이며 중복 키 JSON은 거부한다. 파이프 입력과 터미널 입력을 받으며, 터미널에서는 echo와 canonical 입력을 끈다. 같은 프로세스 안에만 일시적인 `QueryContext`를 유지하고 `close` 또는 EOF에서 종료한다. 백그라운드 재시작·연결 복구·영속 상태는 없다. 호스트가 세션 유지 기능을 제공하지 않으면 단발 호출을 사용한다. 전달 이력이나 자동 중복 제거는 유지하지 않는다.
 
 첫 `open`의 `root`, `active_path`, `selected_paths`, 선택적 `graph`·`source`는 **현재 호스트가 이미 승인 범위와 대조한 경로**다. 자료 본문의 경로나 ACTIVE 전체를 읽기 권한으로 승격하지 않는다. 이후 질의에는 이 전체 목록을 다시 보낼 필요가 없다. 권한이 바뀌면 새로운 `open`으로 범위를 다시 구성한다.
 
-연산은 `search`, `read_spans`, `relations`, `prepare_review_context`의 네 읽기 helper로 제한한다. 세션 제어는 `open`, `ack`, `reset_context`, `close`를 사용한다. `ack`는 응답이 실제 모델 문맥에 온전히 전달된 뒤에만 보낸다. 출력이 잘렸거나 전달 여부를 모르면 확인하지 않는다. 확인 번호는 직전 응답의 메모리 참조일 뿐 권한·판단·저장 승인 토큰이 아니다. `reset_context`는 새 문맥·compaction에 사용하며 기존 전달 이력을 지운다.
+연산은 `search`, `read_spans`, `relations`, `prepare_review_context`의 네 읽기 helper로 제한한다. 세션 제어는 `open`, `close`를 사용한다. 응답의 `response_id`는 요청과 응답의 대응을 돕는 번호이며 수신 확인이나 권한이 아니다. 조회 전달 `ack`, `reset_context`는 세션에서 `unsupported_operation`으로 거부하고 `seen_refs` 인자는 `unsupported_argument`로 거부한다. 그 밖의 내부 오류는 일반 오류로 처리한다. 필요하면 본문을 다시 요청하고 페이지 한도를 확인한다.
 
 ### 지속 stdin 세션
 
@@ -30,24 +30,18 @@ python -B -u "$BATANG_SCRIPTS/query_session.py"
 {"op":"search","args":{"query":"회의","fields":["title","body"]}}
 ```
 
-그 응답이 같은 모델의 문맥에 온전히 전달된 것을 확인한 뒤에만 반환된 `response_id`로 별도의 `ack`를 보낸다. 아래 `1`은 검색 응답에 실제로 그 번호가 반환된 경우의 예시다. 응답·전달을 확인하기 전에 검색과 ACK를 한 명령에 미리 묶지 않는다.
-
-```json
-{"op":"ack","response_id":1}
-```
-
-ACK 응답을 확인한 뒤 같은 검색을 다시 요청할 수 있다. 필요한 확인을 끝내면 같은 프로세스에서 `close`를 보낸다.
+같은 검색을 다시 요청하면 요청한 본문을 페이지 한도 안에서 다시 받는다. 필요한 확인을 끝내면 같은 프로세스에서 `close`를 보낸다.
 
 ```json
 {"op":"search","args":{"query":"회의","fields":["title","body"]}}
 {"op":"close"}
 ```
 
-새 문맥이나 compaction에서는 `reset_context`로 전달 이력을 지우고 필요한 근거를 다시 조회한다. 이는 planner 교체와 별개의 문맥 관리다.
+compaction이나 새 세션에서는 필요한 근거를 다시 조회한다. 이는 planner 교체와 별개의 문맥 관리다.
 
 ### 단발 파이프
 
-지속 stdin을 사용할 수 없다면 입력을 함께 제공하는 단발 조회를 사용할 수 있다. 다음 합성 예시는 `open`, `search`, `close`만 보내며 ACK를 미리 보내지 않는다.
+지속 stdin을 사용할 수 없다면 입력을 함께 제공하는 단발 조회를 사용할 수 있다. 다음 합성 예시는 `open`, `search`, `close`를 보낸다.
 
 ```sh
 printf '%s\n' \
@@ -57,13 +51,13 @@ printf '%s\n' \
   python -B -u "$BATANG_SCRIPTS/query_session.py"
 ```
 
-첫 `ready` 뒤의 `opened`, 검색 응답과 `closed`를 각각 확인한다. 단발 프로세스 종료 후에는 전달 이력이 보존되지 않는다. 실제 사용자 질의나 문서 본문은 이 셸 문자열에 삽입하지 말고 JSON 인코더로 별도 데이터로 전달한다.
+첫 `ready` 뒤의 `opened`, 검색 응답과 `closed`를 각각 확인한다. 전달 이력은 별도로 보존하지 않는다. 실제 사용자 질의나 문서 본문은 이 셸 문자열에 삽입하지 말고 JSON 인코더로 별도 데이터로 전달한다.
 
-ACK 뒤 같은 본문의 재조회는 참조만 반환할 수 있다. 다음 페이지가 있으면 같은 연산·조건과 반환 cursor를 사용한다. 한 항목이나 한 줄이 한도보다 크면 한도 안내를 확인하고 필요한 경우 한도를 늘려 다시 요청한다. 동일 cursor를 무조건 반복하지 않는다. 새 문맥에서는 필요한 근거를 다시 읽는다. 실제 Python 프로세스의 단절과 자료 변경은 별개이며 후자는 helper가 hash로 확인한다.
+다음 페이지가 있으면 같은 연산·조건과 반환 cursor를 사용한다. 한 항목이나 한 줄이 한도보다 크면 한도 안내를 확인하고 필요한 경우 한도를 늘려 다시 요청한다. 동일 cursor를 무조건 반복하지 않는다. 출력이 잘리거나 새 문맥이면 필요한 구간을 다시 읽는다. 실제 Python 프로세스의 단절과 자료 변경은 별개이며 후자는 helper가 hash로 확인한다.
 
 ## 저장·등록·갱신 호출
 
-조회 루프는 쓰기 연산을 받지 않는다. 호스트가 현재 요청으로 승인된 대상·기대 hash·백업을 준비한 뒤 아래 기존 함수를 별도 고정 호출한다. 스킬 실행이나 조회 응답·ack가 쓰기 권한을 추가하지 않는다.
+조회 루프는 쓰기 연산을 받지 않는다. 호스트가 현재 요청으로 승인된 대상·기대 hash·백업을 준비한 뒤 아래 기존 함수를 별도 고정 호출한다. 스킬 실행이나 조회 응답이 쓰기 권한을 추가하지 않는다.
 
 | 요청 | 고정 호출과 전달 자료 | 반환할 정보 |
 |---|---|---|
@@ -111,4 +105,4 @@ summary = {name: getattr(result, name) for name in (
 
 이 요약은 의미 검토를 대신하지 않는다. 새 근거가 부족하면 필요한 구간만 조회한다. 기존 v1 graph를 읽기 위해 v2로 전환하지 않으며 migration·운영 전환·설치는 별도 작업이다.
 
-관계 상세 확인에는 먼저 허용 범위에서 원 기록의 `record_ref`를 확인하고 문서 ID·경로와 현재 hash를 대조한 뒤 필요한 본문 구간을 `read_spans`로 조회한다. `record_ref`와 `scope_sha256`은 원문 접근 권한이나 fetch 토큰이 아니다. 본문 1부터 시작하는 줄과 frontmatter를 포함한 파일 행은 구분한다. `ack`는 실제 모델 수신 확인이며 UI 클릭이나 열람 승인이 아니다.
+관계 상세 확인에는 먼저 허용 범위에서 원 기록의 `record_ref`를 확인하고 문서 ID·경로와 현재 hash를 대조한 뒤 필요한 본문 구간을 `read_spans`로 조회한다. `record_ref`와 `scope_sha256`은 원문 접근 권한이나 fetch 토큰이 아니다. 본문 1부터 시작하는 줄과 frontmatter를 포함한 파일 행은 구분한다.

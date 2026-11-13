@@ -157,10 +157,10 @@ class Imports(unittest.TestCase):
     def test_source_parent_or_leaf_link_alias_is_rejected(self):
         alias = self.root / "source-alias"
         alias.symlink_to(self.source, target_is_directory=True)
-        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
+        with self.assertRaisesRegex(ops.FileError, "path_unavailable"):
             ops.prepare_import(ops.FileScope(alias, ["note.md"]), "note.md", self.target_scope, "copy.md")
         (self.source / "same.md").symlink_to(self.source / "note.md")
-        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
+        with self.assertRaisesRegex(ops.FileError, "path_unavailable"):
             ops.prepare_import(self.source_scope, "same.md", self.target_scope, "copy.md")
 
     def test_same_bytes_from_different_sources_are_not_deduplicated(self):

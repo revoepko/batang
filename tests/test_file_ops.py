@@ -300,24 +300,77 @@ class Files(unittest.TestCase):
         outside.write_bytes(b"untouched")
         self.target.unlink()
         self.target.symlink_to(outside)
-        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
+        with self.assertRaisesRegex(ops.FileError, "path_unavailable") as caught:
             self.scope.read("Knowledge/a.md")
-        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
+        self.assertEqual(caught.exception.scope_location, "internal")
+        self.assertEqual(caught.exception.path_observation, "symlink")
+        self.assertIsNotNone(caught.exception.path_signature)
+        self.assertNotIn(str(outside), str(caught.exception))
+        with self.assertRaisesRegex(ops.FileError, "path_unavailable"):
             self.scope.write("Knowledge/a.md", b"bad")
         self.assertEqual(outside.read_bytes(), b"untouched")
         self.target.unlink()
         (self.root / "Knowledge").rmdir()
         (self.root / "Knowledge").symlink_to(self.root / "backups", target_is_directory=True)
-        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
+        with self.assertRaisesRegex(ops.FileError, "path_unavailable") as caught:
             self.scope.write("Knowledge/new.md", b"bad")
+        self.assertEqual(caught.exception.scope_location, "internal")
+        self.assertEqual(caught.exception.path_signature[-1], ("Knowledge", "new.md"))
         self.assertEqual(list((self.root / "backups").iterdir()), [])
 
     def test_root_symlink_rejected(self):
         alias = self.root / "alias"
         alias.symlink_to(self.root / "Knowledge", target_is_directory=True)
         scope = ops.FileScope(alias, ["a.md"])
-        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
+        with self.assertRaisesRegex(ops.FileError, "path_unavailable") as caught:
             scope.read("a.md")
+        self.assertEqual(caught.exception.scope_location, "root")
+        self.assertIsNone(caught.exception.path_signature)
+        self.assertNotIn(str(alias), str(caught.exception))
+
+    def test_root_missing_and_non_directory_are_global_when_used(self):
+        for root in (self.root / "missing", self.target / "nested"):
+            # 생성이나 세션 open에 새 root preflight를 추가하지 않는다.
+            scope = ops.FileScope(root, ["a.md"])
+            with self.subTest(root=root), self.assertRaises(ops.FileError) as caught:
+                scope.read("a.md")
+            self.assertEqual(caught.exception.scope_location, "root")
+            self.assertEqual(caught.exception.code, "path_unavailable")
+            self.assertNotIn(str(root), str(caught.exception))
+
+    def test_internal_non_directory_observation_is_not_symlink_claim(self):
+        scope = ops.FileScope(self.root, ["Knowledge/a.md/child.md"])
+        with self.assertRaises(ops.FileError) as caught:
+            scope.read("Knowledge/a.md/child.md")
+        self.assertEqual(caught.exception.scope_location, "internal")
+        self.assertEqual(caught.exception.path_observation, "non_directory")
+        self.assertNotIn("symlink", caught.exception.code)
+
+    def test_failed_followup_observation_stays_unknown(self):
+        self.target.unlink()
+        self.target.symlink_to(self.root / "outside.md")
+        with patch.object(ops.os, "stat", side_effect=FileNotFoundError):
+            with self.assertRaises(ops.FileError) as caught:
+                self.scope.read("Knowledge/a.md")
+        self.assertEqual(caught.exception.scope_location, "unknown")
+        self.assertIsNone(caught.exception.path_signature)
+
+    def test_directory_after_failed_open_stays_unknown(self):
+        real_open = ops._open_dir
+        def fail_internal(name, parent=None):
+            if name == "Knowledge":
+                raise OSError(errno.ENOTDIR, "synthetic failure")
+            return real_open(name, parent)
+        with patch.object(ops, "_open_dir", side_effect=fail_internal):
+            with self.assertRaises(ops.FileError) as caught:
+                self.scope.read("Knowledge/a.md")
+        self.assertEqual(caught.exception.scope_location, "unknown")
+        self.assertIsNone(caught.exception.path_observation)
+
+    def test_internal_missing_retains_document_failure_errno(self):
+        scope = ops.FileScope(self.root, ["missing/a.md"])
+        with self.assertRaises(FileNotFoundError):
+            scope.read("missing/a.md")
 
     def test_nonregular_file_rejected(self):
         scope = ops.FileScope(self.root, ["Knowledge"])

@@ -156,7 +156,7 @@ class ImportMapping(unittest.TestCase):
         self.stage.chmod(0o700)
         alias = self.root / "stage-link"
         alias.symlink_to(self.stage, target_is_directory=True)
-        with self.assertRaisesRegex(ops.FileError, "path_symlink"):
+        with self.assertRaisesRegex(ops.FileError, "path_unavailable"):
             ops.FileScope(self.target, ["c.md"], staging_root=alias).write("c.md", b"must not publish")
 
 

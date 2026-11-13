@@ -1,7 +1,7 @@
 """명시된 현재 파일의 읽기 전용 조회. CLI·모델·영속 상태를 만들지 않는다.
 
 QueryContext는 호스트가 고정 호출 안에서 구성한다. context_id는 전달 문맥을
-구별할 뿐 권한이 아니며, 실제 전달을 확인한 ref만 confirm_seen으로 기록한다.
+구별하는 정보용 식별자일 뿐 권한이나 수신 증명이 아니다.
 각 함수는 JSON으로 직렬화 가능한 제한된 packet을 반환한다. currentness는
 snapshot 대응이며 관계의 의미적 타당성이나 추출 완료 판정이 아니다.
 """
@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from collections import deque
 import copy
 import json
+import os
 import re
 import uuid
 
@@ -33,7 +34,7 @@ class QueryLimits:
 
 
 class QueryContext:
-    """명시 FileScope·선택 목록과 비영속 전달 문맥. 자동 상태 복원은 없다."""
+    """명시 FileScope·선택 목록과 비영속 참조 식별. 전달 이력은 보관하지 않는다."""
     def __init__(self, note_scope, active_path, selected_paths, *, graph_scope=None,
                  graph_path=None, context_id=None):
         if (not isinstance(note_scope, FileScope)
@@ -55,16 +56,6 @@ class QueryContext:
         self.context_id = str(uuid.uuid4()) if context_id is None else context_id
         if not isinstance(self.context_id, str) or not self.context_id:
             raise FileError("query_context_invalid")
-        self.seen_refs = []
-
-    def confirm_seen(self, refs):
-        """호스트가 이 모델 문맥에 실제 전달한 refs만 명시적으로 확인한다."""
-        if not isinstance(refs, (list, tuple)) or any(not isinstance(x, dict) for x in refs):
-            raise FileError("query_seen_invalid")
-        self.seen_refs.extend(copy.deepcopy(refs))
-
-    def clear_seen(self):
-        self.seen_refs.clear()
 
 
 def _json(value):
@@ -96,7 +87,7 @@ def _error(exc):
     code = getattr(exc, "code", "")
     if code in {"query_scope_invalid", "path_not_allowed", "active_selection_invalid"}:
         code = "query_scope_invalid"
-    elif code == "path_symlink":
+    elif code in {"path_symlink", "path_unavailable"}:
         code = "query_path_unavailable"
     elif code == "graph_data_size":
         code = "query_graph_limit"
@@ -105,7 +96,7 @@ def _error(exc):
     elif code.startswith(("metadata_", "frontmatter_", "yaml_", "schema_")):
         code = "query_document_invalid"
     elif code not in {"query_context_invalid", "query_limits_invalid", "query_search_invalid",
-                      "query_reference_invalid", "query_seen_invalid", "query_graph_invalid",
+                      "query_reference_invalid", "query_graph_invalid",
                       "query_selector_invalid", "query_operation_invalid", "query_view_invalid",
                       "query_review_invalid", "query_document_collision", "query_excerpt_too_small"}:
         code = "query_invalid_or_unavailable"
@@ -115,6 +106,8 @@ def _error(exc):
 def _safe(function):
     def call(*args, **kwargs):
         try:
+            if "seen_refs" in kwargs:
+                return _packet("error", error_code="unsupported_argument")
             return function(*args, **kwargs)
         except (FileError, OSError, UnicodeError, ValueError, TypeError, KeyError,
                 RecursionError):
@@ -144,22 +137,115 @@ def _document(scope, path):
     return g.Document(scope, path, snapshot.sha256, metadata, body)
 
 
-def _verify(context, active_hash, hashes):
+def _stat_signature(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _observation(scope, path):
+    """허용 상대 경로만 no-follow로 관찰한다. 상세 identity는 출력하지 않는다."""
+    try:
+        with scope._parent(path) as (parent, name):
+            owner = _stat_signature(os.fstat(parent))
+            try:
+                leaf = _stat_signature(os.stat(name, dir_fd=parent, follow_symlinks=False))
+            except FileNotFoundError:
+                leaf = None
+            return (owner, leaf)
+    except FileError as exc:
+        if getattr(exc, "scope_location", None) == "internal" and getattr(exc, "path_signature", None):
+            return exc.path_signature
+        raise
+
+
+def _document_reason(exc):
+    location = getattr(exc, "scope_location", None)
+    if location in {"root", "unknown"}:
+        raise exc
+    if isinstance(exc, ConflictError):
+        return "snapshot_changed"
+    if location == "internal" or getattr(exc, "code", "") in {"path_symlink", "not_regular"}:
+        return "path_unavailable"
+    if isinstance(exc, FileNotFoundError):
+        return "document_missing"
+    if isinstance(exc, PermissionError):
+        return "permission_denied"
+    if isinstance(exc, OSError):
+        return "io_error"
+    if isinstance(exc, (UnicodeError, FileError)):
+        return "document_invalid"
+    raise exc
+
+
+def _collect(context, paths, *, retain_body=True):
+    docs, failures, observations = {}, {}, {}
+    for path in paths:
+        before = _observation(context.note_scope, path)
+        try:
+            doc = _document(context.note_scope, path)
+        except (FileError, OSError, UnicodeError) as exc:
+            reason = _document_reason(exc)
+        else:
+            reason = None
+        after = _observation(context.note_scope, path)
+        observations[path] = after
+        if before != after:
+            failures[path] = "snapshot_changed"
+        elif reason is not None:
+            failures[path] = reason
+        else:
+            docs[path] = (doc if retain_body else
+                          g.Document(doc.scope, doc.path, doc.sha256, doc.metadata, b""))
+    groups = {}
+    for path, doc in docs.items():
+        groups.setdefault(doc.document_id, []).append(path)
+    for paths in groups.values():
+        if len(paths) > 1:
+            for path in paths:
+                failures[path] = "document_collision"
+                del docs[path]
+    return docs, failures, observations
+
+
+def _verify(context, active_hash, docs, failures, observations):
     if context.note_scope.read(context.active_path).sha256 != active_hash:
         raise ConflictError("query_active_changed")
-    for path, digest in hashes:
-        if context.note_scope.read(path).sha256 != digest:
+    for path, expected in observations.items():
+        if _observation(context.note_scope, path) != expected:
             raise ConflictError("query_source_changed")
+        if path in docs:
+            try:
+                current = context.note_scope.read(path).sha256
+            except (FileError, OSError, UnicodeError):
+                raise ConflictError("query_source_changed") from None
+            if current != docs[path].sha256:
+                raise ConflictError("query_source_changed")
 
 
-def _identity(context, active_hash, hashes, query, graph_hash=None):
+def _identity(context, active_hash, hashes, query, graph_hash=None, failures=None, observations=None):
     value = [context.note_scope.root_parts, sorted(context.note_scope.allowed),
              context.active_path, active_hash, sorted(context.selected_paths), hashes,
-             query, graph_hash]
+             query, graph_hash, sorted((failures or {}).items()),
+             sorted((observations or {}).items())]
     if context.graph_scope is not None:
         value.extend([context.graph_scope.root_parts, sorted(context.graph_scope.allowed),
                       context.graph_path])
     return sha256(_json(value))
+
+
+def _omissions(*groups):
+    values = {}
+    for group in groups:
+        for item in group:
+            key = ((0, item) if isinstance(item, str)
+                   else (1, item["path"], item["reason"]))
+            values[key] = item
+    return [values[key] for key in sorted(values)]
+
+
+def _failure_omissions(failures):
+    return _omissions(["document_failure"] if failures else [],
+                      [{"path": path, "reason": reason} for path, reason in failures.items()])
 
 
 def _offset(cursor, fingerprint):
@@ -172,10 +258,15 @@ def _offset(cursor, fingerprint):
     return cursor["offset"]
 
 
-def _page(items, *, fingerprint, cursor, limits, extra=None):
-    """중단 위치는 원 후보 순서에 결합한다. 전달되지 않은 ref는 seen이 아니다."""
+def _page(items, *, fingerprint, cursor, limits, extra=None, failures=None, omissions=()):
+    """offset은 정상 결과 스트림 위치이며 전체 실패 목록을 매 페이지 반복한다."""
     start = _offset(cursor, fingerprint)
+    base = _omissions(_failure_omissions(failures or {}), omissions)
     result = _packet(**(extra or {}))
+    result["omissions"] = base
+    # cursor는 실제 페이지가 잘릴 때만 필수다. 빈 최종 페이지에는 더하지 않는다.
+    if len(_json(result)) > limits.max_bytes:
+        return _packet("limit", error_code="query_metadata_exceeds_limit")
     consumed, total = start, 0
     for index, item in enumerate(items):
         total = index + 1
@@ -186,7 +277,7 @@ def _page(items, *, fingerprint, cursor, limits, extra=None):
         if "_limit" in item:
             result.update(status="partial" if result["items"] else "limit", truncated=True,
                           next_cursor={"fingerprint": fingerprint, "offset": consumed},
-                          omissions=[item["_limit"]],
+                          omissions=_omissions(base, [item["_limit"]]),
                           required_excerpt_bytes=item["required_excerpt_bytes"])
             return result if len(_json(result)) <= limits.max_bytes else _packet("limit", error_code="query_metadata_exceeds_limit")
         proposed = copy.deepcopy(result)
@@ -194,7 +285,7 @@ def _page(items, *, fingerprint, cursor, limits, extra=None):
         following = consumed + 1
         proposed.update(status="partial", truncated=True,
                         next_cursor={"fingerprint": fingerprint, "offset": following},
-                        omissions=["response_limit"])
+                        omissions=_omissions(base, ["response_limit"]))
         if len(_json(proposed)) > limits.max_bytes:
             break
         result = proposed
@@ -202,17 +293,14 @@ def _page(items, *, fingerprint, cursor, limits, extra=None):
     else:
         if start > total:
             raise ConflictError("query_cursor_changed")
-        result.update(status="ok" if result["items"] else "absent", truncated=False,
-                      next_cursor=None, omissions=[])
+        result.update(status="partial" if base else "ok" if result["items"] else "absent",
+                      truncated=False, next_cursor=None, omissions=base)
         return result if len(_json(result)) <= limits.max_bytes else _packet("limit", error_code="query_metadata_exceeds_limit")
     if consumed < total:
         result.update(status="partial" if result["items"] else "limit", truncated=True,
                       next_cursor={"fingerprint": fingerprint, "offset": consumed},
-                      omissions=["response_limit" if result["items"] else "item_exceeds_byte_limit"])
-    if len(_json(result)) > limits.max_bytes:
-        # 추가 메타데이터도 전체 응답 예산에 포함한다.
-        result = _packet("limit", error_code="query_metadata_exceeds_limit")
-    return result
+                      omissions=_omissions(base, ["response_limit" if result["items"] else "item_exceeds_byte_limit"]))
+    return result if len(_json(result)) <= limits.max_bytes else _packet("limit", error_code="query_metadata_exceeds_limit")
 
 
 def _ref(context, doc, start, end):
@@ -233,37 +321,6 @@ def _line_offsets(body):
     return result
 
 
-def _seen_ranges(context, doc, seen_refs):
-    refs = context.seen_refs if seen_refs is None else seen_refs
-    if not isinstance(refs, (list, tuple)):
-        raise FileError("query_seen_invalid")
-    ranges = []
-    for ref in refs:
-        if not isinstance(ref, dict):
-            raise FileError("query_seen_invalid")
-        if (ref.get("context_id") != context.context_id or ref.get("path") != doc.path
-                or ref.get("document_id") != doc.document_id
-                or ref.get("source_sha256") != doc.sha256):
-            continue
-        a, b = ref.get("start_byte"), ref.get("end_byte")
-        if (type(a) is int and type(b) is int and 0 <= a < b <= len(doc.body)
-                and sha256(doc.body[a:b]) == ref.get("span_sha256")):
-            try:
-                if _request_range(doc, ref) == (a, b):
-                    ranges.append((a, b))
-            except FileError:
-                continue
-    return sorted(ranges)
-
-
-def _unseen(start, end, ranges):
-    intervals = [(start, end)]
-    for a, b in ranges:
-        intervals = [(x, y) for left, right in intervals
-                     for x, y in ((left, min(right, a)), (max(left, b), right)) if x < y]
-    return intervals
-
-
 def _chunks(body, start, end, size):
     while start < end:
         stop = min(end, start + size)
@@ -279,8 +336,7 @@ def _chunks(body, start, end, size):
         start = stop
 
 
-def _spans(context, doc, start, end, limits, seen_refs):
-    ranges = _seen_ranges(context, doc, seen_refs)
+def _spans(context, doc, start, end, limits):
     # 저장 evidence_span과 같은 완전 줄만 참조한다. 긴 줄을 임의 절단하지 않는다.
     for a, b in _line_offsets(doc.body):
         if a < start or b > end:
@@ -288,16 +344,13 @@ def _spans(context, doc, start, end, limits, seen_refs):
         if b - a > limits.max_excerpt_bytes:
             yield {"_limit": "line_exceeds_excerpt_limit", "required_excerpt_bytes": b - a}
             continue
-        fragments = [{"ref": _ref(context, doc, x, y),
-                      "text": doc.body[x:y].decode("utf-8")}
-                     for x, y in _unseen(a, b, ranges)]
-        yield {"ref": _ref(context, doc, a, b), "spans": fragments,
-               "already_seen": not fragments}
+        ref = _ref(context, doc, a, b)
+        yield {"ref": ref, "spans": [{"ref": ref, "text": doc.body[a:b].decode("utf-8")}]}
 
 
 @_safe
 def search(context, query, *, fields=("title", "id", "tags", "aliases", "body"),
-           limits=None, cursor=None, seen_refs=None):
+           limits=None, cursor=None):
     """선택 문서를 순차로 읽는 결정적 부분문자열 검색. 의미 검색은 아니다."""
     limits = _limits(limits)
     if (not isinstance(query, str) or not query.strip() or not isinstance(fields, (list, tuple))
@@ -305,18 +358,19 @@ def search(context, query, *, fields=("title", "id", "tags", "aliases", "body"),
             or not set(fields).issubset({"title", "id", "tags", "aliases", "body"})):
         raise FileError("query_search_invalid")
     active, paths = _selection(context)
-    hashes, ids = [], set()
+    docs, failures, observations = _collect(context, paths, retain_body=False)
+    hashes = [(path, doc.sha256) for path, doc in docs.items()]
     needle = query.casefold()
-    for path in paths:
-        doc = _document(context.note_scope, path)
-        if doc.document_id in ids:
-            raise FileError("query_document_collision")
-        ids.add(doc.document_id)
-        hashes.append((path, doc.sha256))
     def matches():
         # 본문을 모든 후보 packet으로 누적하지 않는다. 한 문서와 반환 페이지만 보유한다.
-        for path in paths:
-            doc = _document(context.note_scope, path)
+        for path, observed in docs.items():
+            # 선검사 후 본문은 한 문서씩 읽고 변경은 전체 stale로 승격한다.
+            try:
+                doc = _document(context.note_scope, path)
+            except (FileError, OSError, UnicodeError):
+                raise ConflictError("query_source_changed") from None
+            if doc.sha256 != observed.sha256:
+                raise ConflictError("query_source_changed")
             values = {"title": [doc.metadata["subject"]], "id": [doc.document_id],
                       "tags": doc.metadata["tags"], "aliases": doc.metadata.get("aliases", [])}
             matched = [field for field in fields if field != "body" and
@@ -327,21 +381,23 @@ def search(context, query, *, fields=("title", "id", "tags", "aliases", "body"),
                 if "body" not in fields or needle not in doc.body[a:b].decode("utf-8").casefold():
                     continue
                 body_match = True
-                for item in _spans(context, doc, a, b, limits, seen_refs):
+                for item in _spans(context, doc, a, b, limits):
                     yield dict(item, path=path, document_id=doc.document_id,
                                matched_fields=matched + ["body"])
             if matched and not body_match:
                 if offsets:
-                    for item in _spans(context, doc, *offsets[0], limits, seen_refs):
+                    for item in _spans(context, doc, *offsets[0], limits):
                         yield dict(item, path=path, document_id=doc.document_id, matched_fields=matched)
                 else:
                     yield {"path": path, "document_id": doc.document_id,
                            "source_sha256": doc.sha256, "matched_fields": matched, "spans": []}
     fingerprint = _identity(context, active.sha256, hashes,
-                            ["search", query, list(fields)])
+                            ["search", query, list(fields)],
+                            failures=failures, observations=observations)
     result = _page(matches(), fingerprint=fingerprint, cursor=cursor, limits=limits,
-                   extra={"method": "literal_casefold", "semantic_completeness": "not_assessed"})
-    _verify(context, active.sha256, hashes)
+                   extra={"method": "literal_casefold", "semantic_completeness": "not_assessed"},
+                   failures=failures)
+    _verify(context, active.sha256, docs, failures, observations)
     return result
 
 
@@ -372,7 +428,7 @@ def _request_range(doc, request):
 
 
 @_safe
-def read_spans(context, requests, *, limits=None, cursor=None, seen_refs=None):
+def read_spans(context, requests, *, limits=None, cursor=None):
     """현재 선택 문서의 hash가 있는 실제 참조만 확인해 전달한다."""
     limits = _limits(limits)
     if not isinstance(requests, (list, tuple)):
@@ -380,31 +436,36 @@ def read_spans(context, requests, *, limits=None, cursor=None, seen_refs=None):
     active, paths = _selection(context)
     if any(not isinstance(x, dict) or x.get("path") not in paths for x in requests):
         raise FileError("query_scope_invalid")
-    items, hashes, docs = [], [], {}
-    # 요청하지 않은 본문은 읽지 않는다. cursor는 이 요청의 source snapshot에 결합한다.
-    for path in sorted({x["path"] for x in requests}):
-        docs[path] = _document(context.note_scope, path)
-        hashes.append((path, docs[path].sha256))
-    if len({d.document_id for d in docs.values()}) != len(docs):
-        raise FileError("query_document_collision")
+    paths = sorted({x["path"] for x in requests})
+    docs, failures, observations = _collect(context, paths)
+    ranges = []
     for request in requests:
-        doc = docs[request["path"]]
-        a, b = _request_range(doc, request)
-        items.extend(_spans(context, doc, a, b, limits, seen_refs))
-    _verify(context, active.sha256, hashes)
+        path = request["path"]
+        if path not in docs:
+            continue
+        try:
+            a, b = _request_range(docs[path], request)
+            ranges.append((path, a, b))
+        except ConflictError as exc:
+            failures[path] = "reference_invalid" if exc.code == "query_span_changed" else "snapshot_changed"
+        except (FileError, UnicodeError):
+            failures[path] = "reference_invalid"
+    items = [item for path, a, b in ranges if path not in failures
+             for item in _spans(context, docs[path], a, b, limits)]
+    hashes = [(path, doc.sha256) for path, doc in docs.items()]
     fingerprint = _identity(context, active.sha256, hashes,
-                            ["read_spans", requests])
-    return _page(items, fingerprint=fingerprint, cursor=cursor, limits=limits)
-
-
-def _load(context):
-    active, paths = _selection(context)
-    docs = tuple(_document(context.note_scope, p) for p in paths)
-    if len({d.document_id for d in docs}) != len(docs):
-        raise FileError("query_document_collision")
-    result = g.ActiveDocuments(context.note_scope, context.active_path, active.sha256, docs)
-    g._verify_current(result)
+                            ["read_spans", requests],
+                            failures=failures, observations=observations)
+    result = _page(items, fingerprint=fingerprint, cursor=cursor, limits=limits, failures=failures)
+    _verify(context, active.sha256, docs, failures, observations)
     return result
+
+
+def _load(context, paths=None):
+    active, selected = _selection(context)
+    docs, failures, observations = _collect(context, selected if paths is None else paths)
+    result = g.ActiveDocuments(context.note_scope, context.active_path, active.sha256, tuple(docs.values()))
+    return result, docs, failures, observations
 
 
 def _graph(context):
@@ -546,47 +607,23 @@ def _record_scope(context, active, item, graph_hash):
     return _identity(context, active.active_sha256, hashes, None, graph_hash)
 
 
-def _record_item(context, item, graph_hash, active, seen_refs=None):
+def _record_item(context, item, graph_hash, active):
     payload = {k: v for k, v in item.items() if k != "type"}
     ref = {"context_id": context.context_id, "graph_sha256": graph_hash,
            "scope_sha256": _record_scope(context, active, item, graph_hash),
            "record_sha256": sha256(_json(payload))}
-    refs = context.seen_refs if seen_refs is None else seen_refs
-    if not isinstance(refs, (list, tuple)):
-        raise FileError("query_seen_invalid")
-    if ref in refs:
-        return {"record_ref": ref, "already_seen": True,
-                **({"type": item["type"]} if "type" in item else {})}
-    return dict(item, record_ref=ref, already_seen=False)
+    return dict(item, record_ref=ref)
 
 
-def _source_spans(context, scope, path, snapshot, limits, seen_refs):
-    refs = context.seen_refs if seen_refs is None else seen_refs
-    if not isinstance(refs, (list, tuple)):
-        raise FileError("query_seen_invalid")
+def _source_spans(context, scope, path, snapshot, limits):
     scope_id = sha256(_json([scope.root_parts, sorted(scope.allowed)]))
-    ranges = []
-    for ref in refs:
-        if not isinstance(ref, dict):
-            raise FileError("query_seen_invalid")
-        if (ref.get("context_id") != context.context_id or ref.get("source_path") != path
-                or ref.get("source_scope_sha256") != scope_id
-                or ref.get("source_sha256") != snapshot.sha256):
-            continue
-        a, b = ref.get("start_byte"), ref.get("end_byte")
-        if (type(a) is int and type(b) is int and 0 <= a < b <= len(snapshot.data)
-                and sha256(snapshot.data[a:b]) == ref.get("span_sha256")):
-            snapshot.data[a:b].decode("utf-8")
-            ranges.append((a, b))
     for a, b in _chunks(snapshot.data, 0, len(snapshot.data), limits.max_excerpt_bytes):
-        spans = []
-        for x, y in _unseen(a, b, sorted(ranges)):
-            ref = {"context_id": context.context_id, "source_scope_sha256": scope_id,
-                   "source_path": path, "source_sha256": snapshot.sha256,
-                   "start_byte": x, "end_byte": y, "span_sha256": sha256(snapshot.data[x:y])}
-            spans.append({"ref": ref, "text": snapshot.data[x:y].decode("utf-8")})
+        ref = {"context_id": context.context_id, "source_scope_sha256": scope_id,
+               "source_path": path, "source_sha256": snapshot.sha256,
+               "start_byte": a, "end_byte": b, "span_sha256": sha256(snapshot.data[a:b])}
         yield {"type": "source_content", "source_path": path,
-               "source_sha256": snapshot.sha256, "spans": spans, "already_seen": not spans}
+               "source_sha256": snapshot.sha256,
+               "spans": [{"ref": ref, "text": snapshot.data[a:b].decode("utf-8")}]}
 
 
 def _decision_allowed(decision, docs, visible_ids, existing_ids, hidden):
@@ -722,36 +759,44 @@ def _traverse(records, version, graph, operation, selector, depth):
 
 @_safe
 def relations(context, *, operation="records", selector=None, view="raw", limits=None,
-              cursor=None, seen_refs=None):
+              cursor=None):
     """v1/v2의 허용 원 기록 조회. 표시 투영은 별도 project_graph 호출이다."""
     limits = _limits(limits)
     if view != "raw":
         raise FileError("query_view_invalid")
-    active = _load(context)
+    active, doc_paths, failures, observations = _load(context)
     graph, digest = _graph(context)
     if graph is None:
         if cursor is not None:
             raise ConflictError("query_cursor_changed")
-        return _packet("absent", graph_status="missing")
+        _verify(context, active.active_sha256, doc_paths, failures, observations)
+        fingerprint = _identity(context, active.active_sha256,
+                                [(p, d.sha256) for p, d in doc_paths.items()],
+                                ["relations", operation, selector, view, limits.max_depth],
+                                failures=failures, observations=observations)
+        return _page([], fingerprint=fingerprint, cursor=cursor, limits=limits,
+                     failures=failures, extra={"graph_status": "missing"})
     records, version = _records(graph, {d.document_id: d for d in active.documents})
     selected, exploration = _traverse(records, version, graph, operation, selector, limits.max_depth)
-    g._verify_current(active)
+    _verify(context, active.active_sha256, doc_paths, failures, observations)
     if context.graph_scope.read(context.graph_path).sha256 != digest:
         raise ConflictError("query_graph_changed")
     fingerprint = _identity(context, active.active_sha256,
                             [(d.path, d.sha256) for d in active.documents],
-                            ["relations", operation, selector, view, limits.max_depth], digest)
-    selected = [_record_item(context, item, digest, active, seen_refs) for item in selected]
+                            ["relations", operation, selector, view, limits.max_depth], digest,
+                            failures=failures, observations=observations)
+    selected = [_record_item(context, item, digest, active) for item in selected]
     extra = {"graph_status": "available", "graph_sha256": digest,
              "format": version, "view": "raw", "semantic_completeness": "not_assessed"}
     if version == 1 and "directed" in graph:
         extra["directed"] = graph["directed"]
     if exploration is not None:
         extra["exploration"] = exploration
-    result = _page(selected, fingerprint=fingerprint, cursor=cursor, limits=limits, extra=extra)
-    if exploration is not None and "exploration" in result and exploration["depth_limited"]:
+    result = _page(selected, fingerprint=fingerprint, cursor=cursor, limits=limits, extra=extra, failures=failures,
+                   omissions=["exploration_depth_limit"] if exploration and exploration["depth_limited"] else [])
+    if exploration is not None and "exploration" in result and exploration["depth_limited"] and result["status"] != "limit":
         result.update(status="partial", truncated=True,
-                      omissions=sorted(set((*result["omissions"], "exploration_depth_limit"))))
+                      omissions=_omissions(result["omissions"], ["exploration_depth_limit"]))
     elif (exploration is not None and exploration.get("outcome") == "path_found"
           and result["status"] == "absent"):
         result["status"] = "ok"
@@ -761,7 +806,7 @@ def relations(context, *, operation="records", selector=None, view="raw", limits
 @_safe
 def prepare_review_context(context, *, stage, target_paths=(), comparison_paths=(),
                            source_scope=None, source_paths=(), mode="incremental",
-                           limits=None, cursor=None, seen_refs=None):
+                           limits=None, cursor=None):
     """명시 source 준비 또는 실제 등록 후 관계 검토 입력을 분할한다. 쓰기 없음."""
     limits = _limits(limits)
     if stage not in {"pre_registration", "post_registration"} or mode not in {"full", "incremental"}:
@@ -782,7 +827,7 @@ def prepare_review_context(context, *, stage, target_paths=(), comparison_paths=
             snapshot = source_scope.read(path)
             snapshot.data.decode("utf-8")
             hashes.append((path, snapshot.sha256))
-            items.extend(_source_spans(context, source_scope, path, snapshot, limits, seen_refs))
+            items.extend(_source_spans(context, source_scope, path, snapshot, limits))
         for path, digest in hashes:
             if source_scope.read(path).sha256 != digest:
                 raise ConflictError("query_source_changed")
@@ -798,19 +843,21 @@ def prepare_review_context(context, *, stage, target_paths=(), comparison_paths=
                 or len(set(comparison_paths)) != len(comparison_paths)
                 or not set((*target_paths, *comparison_paths)).issubset(context.selected_paths)):
             raise FileError("query_scope_invalid")
-        # 실제 같은 root/ACTIVE/hash로 읽은 객체만 기존 discover_candidates에 전달한다.
-        _selection(context)
-        active = g.read_active_documents(context.note_scope, context.active_path,
-                                         sorted(set((*target_paths, *comparison_paths))))
-        targets = g.read_active_documents(context.note_scope, context.active_path, sorted(target_paths))
-        comparisons = g.read_active_documents(context.note_scope, context.active_path, sorted(comparison_paths))
+        # 정상 부분집합은 원문 전달에만 사용하고 불완전한 후보 판단을 합성하지 않는다.
+        active, doc_paths, failures, observations = _load(
+            context, sorted(set((*target_paths, *comparison_paths))))
+        targets = g.ActiveDocuments(context.note_scope, context.active_path, active.active_sha256,
+                                    tuple(d for d in active.documents if d.path in target_paths))
+        comparisons = g.ActiveDocuments(context.note_scope, context.active_path, active.active_sha256,
+                                        tuple(d for d in active.documents if d.path in comparison_paths))
         graph, graph_hash = _graph(context)
         envelope = graph if graph is not None and "batang_graph_format" in graph else None
         docs = {d.document_id: d for d in active.documents}
         target_ids = {d.document_id for d in targets.documents}
         records, version = ([], None) if graph is None else _records(graph, docs)
         # 기존 history/기존 판단 처리는 이 명시된 관계 검토 준비에서만 수행한다.
-        plan = _review_plan(targets, comparisons, envelope, docs, records)
+        plan = ({"method": "not_assessed", "status": "not_run", "omissions": ["document_failure"], "candidates": []}
+                if failures else _review_plan(targets, comparisons, envelope, docs, records))
         affected = [x for x in records if (r._dependencies(x["record"]) & target_ids
                     if version == 2 else any(n.get("document_id") in target_ids for n in x["nodes"]))]
         affected_ids = set(target_ids)
@@ -818,11 +865,11 @@ def prepare_review_context(context, *, stage, target_paths=(), comparison_paths=
             if version == 2:
                 affected_ids.update(r._dependencies(item["record"]))
         # full는 모든 명시 비교 원문, incremental은 변경·endpoint·제3 support 우선.
-        content_ids = set(docs) if mode == "full" else affected_ids
+        content_ids = set(docs) if mode == "full" or failures else affected_ids
         for doc in active.documents:
             hashes.append((doc.path, doc.sha256))
             if doc.document_id in content_ids:
-                for item in _spans(context, doc, 0, len(doc.body), limits, seen_refs):
+                for item in _spans(context, doc, 0, len(doc.body), limits):
                     items.append(dict(item, type="document_content"))
         items.extend(dict(item, type="existing_record") for item in affected)
         # 현재 대상에 관련된 최소 결정만 반환하며 raw history 전체를 보내지 않는다.
@@ -830,13 +877,14 @@ def prepare_review_context(context, *, stage, target_paths=(), comparison_paths=
             review_scope = _identity(context, active.active_sha256, [], None, graph_hash)
             items.extend(_judgments(envelope, docs, target_ids, affected, review_scope))
         items.extend({"type": "additional_candidate", **candidate} for candidate in plan["candidates"])
-        g._verify_current(active)
+        _verify(context, active.active_sha256, doc_paths, failures, observations)
         if graph_hash is not None and context.graph_scope.read(context.graph_path).sha256 != graph_hash:
             raise ConflictError("query_graph_changed")
         fingerprint = _identity(context, active.active_sha256, hashes,
                                 ["prepare_review_context", stage, sorted(target_paths),
-                                 sorted(comparison_paths), mode], graph_hash)
-        items = [_record_item(context, item, graph_hash, active, seen_refs)
+                                 sorted(comparison_paths), mode], graph_hash,
+                                failures=failures, observations=observations)
+        items = [_record_item(context, item, graph_hash, active)
                  if item["type"] in {"existing_record", "existing_judgment", "additional_candidate"}
                  else item for item in items]
         extra = {"stage": stage, "mode": mode, "scope": "explicit_active_selection",
@@ -846,7 +894,8 @@ def prepare_review_context(context, *, stage, target_paths=(), comparison_paths=
                  "semantic_completeness": "not_assessed", "registration_performed": False,
                  "packet_complete_is_review_complete": False,
                  "coverage_note": "explicit_targets_and_comparisons_only; bounded_pages; scope_limited_records; lexical_candidates_may_omit_semantic_pairs; request_more_evidence"}
-    result = _page(items, fingerprint=fingerprint, cursor=cursor, limits=limits, extra=extra)
+    result = _page(items, fingerprint=fingerprint, cursor=cursor, limits=limits, extra=extra,
+                   failures=failures if stage == "post_registration" else None)
     result["review_completion"] = "not_assessed"
     if len(_json(result)) > limits.max_bytes:
         return _packet("limit", error_code="query_metadata_exceeds_limit")

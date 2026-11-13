@@ -35,8 +35,13 @@ _link_data = _internal_module("link_data")
 class FileError(ValueError):
     """원문 내용이나 민감 경로를 포함하지 않는 계약 오류."""
 
-    def __init__(self, code, *, key=None, line=None):
+    def __init__(self, code, *, key=None, line=None, scope_location=None,
+                 path_observation=None, path_signature=None):
         self.code, self.key, self.line = code, key, line
+        # 위치와 실패 후 관찰은 내부 오류 분류용이다. 경로나 관찰값을 메시지에 싣지 않는다.
+        self.scope_location = scope_location
+        self.path_observation = path_observation
+        self.path_signature = path_signature
         if code.startswith(("yaml_", "frontmatter_", "metadata_", "import_yaml")):
             message = "속성 형식을 확인해 주세요. 문제가 있는 값은 자동으로 고치지 않습니다."
         elif code in ("private_staging_unavailable", "staging_path"):
@@ -320,7 +325,7 @@ def read_source_reference(source, source_roots, scopes):
 
 def _source_snapshot(scope, path):
     with scope._parent(path) as (parent, name):
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        fd = _open_leaf(parent, name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         try:
             before = os.fstat(fd)
             result = _read_fd_at(parent, name, fd)
@@ -743,6 +748,39 @@ def _open_dir(name, parent=None):
     return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
 
 
+def _path_failure(parent, name, remaining, location):
+    """실패 위치만 구분한다. 실패 뒤 stat은 원인 확정이나 링크 추적이 아니다."""
+    if location == "root":
+        return FileError("path_unavailable", scope_location="root")
+    try:
+        observed = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        held = os.fstat(parent)
+    except OSError:
+        return FileError("path_unavailable", scope_location="unknown")
+    if stat.S_ISLNK(observed.st_mode):
+        observation = "symlink"
+    elif not stat.S_ISDIR(observed.st_mode):
+        observation = "non_directory"
+    else:
+        # 실패 뒤 directory가 보이면 교체 경합 등 원인이 불명이다.
+        return FileError("path_unavailable", scope_location="unknown")
+    def signature(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns)
+    return FileError("path_unavailable", scope_location="internal",
+                     path_observation=observation,
+                     path_signature=(signature(held), signature(observed), tuple(remaining)))
+
+
+def _open_leaf(parent, name, flags):
+    try:
+        return os.open(name, flags, dir_fd=parent)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise _path_failure(parent, name, (name,), "internal") from None
+        raise
+
+
 def _identity(info):
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
@@ -937,7 +975,7 @@ def _read_fd_at(parent, name, fd):
 
 
 def _read_at(parent, name):
-    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    fd = _open_leaf(parent, name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         return _read_fd_at(parent, name, fd)
     finally:
@@ -966,16 +1004,30 @@ class FileScope:
             raise FileError("path_not_allowed")
         fd = None
         try:
-            fd = _open_dir("/")
-            for component in self.root_parts + parts[:-1]:
-                following = _open_dir(component, fd)
+            try:
+                fd = _open_dir("/")
+                for component in self.root_parts:
+                    following = _open_dir(component, fd)
+                    os.close(fd)
+                    fd = following
+            except OSError:
+                raise FileError("path_unavailable", scope_location="root") from None
+            for index, component in enumerate(parts[:-1]):
+                try:
+                    following = _open_dir(component, fd)
+                except OSError as exc:
+                    if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                        raise _path_failure(fd, component, parts[index:], "internal") from None
+                    raise
                 os.close(fd)
                 fd = following
-            yield fd, parts[-1]
-        except OSError as exc:
-            if exc.errno in (errno.ELOOP, errno.ENOTDIR):
-                raise FileError("path_symlink") from None
-            raise
+            try:
+                yield fd, parts[-1]
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                    # caller 내부의 별도 경로(예: staging) 실패를 선택 파일 문제로 단정하지 않는다.
+                    raise FileError("path_unavailable", scope_location="unknown") from None
+                raise
         finally:
             if fd is not None:
                 os.close(fd)
@@ -993,8 +1045,8 @@ class FileScope:
             raise FileError("expected_hash")
         with self._parent(path) as (parent, name), ExitStack() as descriptors:
             try:
-                original_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
-                                      dir_fd=parent)
+                original_fd = _open_leaf(parent, name,
+                                         os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             except FileNotFoundError:
                 original_fd = None
                 previous = None
