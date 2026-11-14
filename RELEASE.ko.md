@@ -2,6 +2,19 @@
 
 [English](RELEASE.md)
 
+## 0.1.1-d
+
+### 변경
+
+- 조회할 때 요청한 본문을 페이지와 응답 크기 한도 안에서 다시 전달합니다. [조회 안내](skills/batang/references/query.md)
+- 허용·활성 범위에서 선택한 문서에 오류가 있으면 정상 결과와 문서별 누락 사유를 함께 표시합니다. 실패 목록은 각 페이지에 반복되며 부분 결과는 전체 조회 완료를 뜻하지 않습니다. [조회 안내](skills/batang/references/query.md)
+- 관계 graph의 root 폴더나 graph 파일이 아직 없어도 graph 부재를 알리고 조회와 등록 후 검토 준비를 이어갈 수 있습니다.
+- root 설정에서 입력 경로와 실제 경로가 다르면 두 경로를 확인하고 승인된 실제 경로를 사용합니다. 실행 중에는 링크를 엄격히 거부하고 자동으로 해석하지 않습니다. [준비와 설정](skills/batang/components/gadak/workflow.md) · [파일 접근](skills/batang/references/source-access.md)
+
+### 호환성
+
+- 조회 전달용 `ack`, `reset_context`, `seen_refs`와 출력의 `already_seen`을 제거했습니다. 기존 호출자는 이 요청과 출력 의존성을 없애고 필요한 본문을 다시 조회해 주세요. [조회 프로세스](skills/batang/references/calls.md#조회-프로세스)
+
 ## 0.1.1-c
 
 ### 변경

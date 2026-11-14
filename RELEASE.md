@@ -2,6 +2,19 @@
 
 [한국어](RELEASE.ko.md)
 
+## 0.1.1-d
+
+### Changed
+
+- Requested query content is returned again within page and response-size limits. [Query guidance](skills/batang/references/query.md)
+- When a selected document in the permitted active scope fails, valid results can be returned with document-specific omissions. The failure list is repeated on each page; a partial result does not mean the whole query is complete. [Query guidance](skills/batang/references/query.md)
+- When the graph root directory or graph file is not yet present, lookups and post-registration review preparation can continue while reporting the missing graph.
+- When an entered root path differs from its actual path, review both and approve the actual path for the setting. At runtime, symlinks are strictly rejected and paths are not automatically resolved. [Setup guidance](skills/batang/components/gadak/workflow.md) · [File access](skills/batang/references/source-access.md)
+
+### Compatibility
+
+- Removed query-delivery `ack`, `reset_context`, `seen_refs`, and the `already_seen` output. Update existing callers to remove these requests and output dependencies, and request needed content again. [Query process](skills/batang/references/calls.md#조회-프로세스)
+
 ## 0.1.1-c
 
 ### Changed
