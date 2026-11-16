@@ -2,7 +2,7 @@
 
 # Batang
 
-Batang is an AI skill that finds what you need in the notes you choose, shows where it came from, and helps you use it in software, documents, and diagrams.
+Batang is a Codex skill that finds what you need in the Obsidian notes you choose, shows where it came from, and helps you use it in software, documents, and diagrams.
 When you import existing notes, the originals stay untouched and Batang works on copies.
 
 [Release notes](RELEASE.md)
