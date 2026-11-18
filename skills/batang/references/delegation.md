@@ -39,11 +39,11 @@
 
 | 역할 | Codex 예시 |
 | --- | --- |
-| `planner_normal` / `planner` | gpt-6-astra / medium |
-| `planner_expert` | gpt-6-astra / xhigh |
+| `planner_normal` / `planner` | gpt-6.2-astra / medium |
+| `planner_expert` | gpt-6.2-astra / xhigh |
 | `explorer` | gpt-6-luna / medium |
 | `coder_light` | gpt-6-luna / high |
-| `coder_frontend`, `coder_heavy` | gpt-6.1-sol / high |
+| `coder_frontend`, `coder_heavy` | gpt-6.2-sol / high |
 | `docs_writer`, `app_operator` | gpt-6.1-terra / medium |
-| `reviewer`, `quality_checker`, `security_checker`, `security_tester` | gpt-6.1-sol / high |
+| `reviewer`, `quality_checker`, `security_checker`, `security_tester` | gpt-6.2-sol / high |
 | `security_checker_daybreak` | gpt-6-sol / high, 실제 접근·모드 확인 시 |
